@@ -1721,7 +1721,7 @@ stage:
 
 Run it with `./att.sh debug template PAYMENT_INVOKE`. Template expressions should prefer `${EXEC.INPUT.amount}`, `${EXEC.INPUT.environment}`, and the current Stage value `${EXEC.INPUT.channel}`; the current Stage's `values` overlay Case-level input for that Stage, with the Stage value winning on collisions. The corresponding `CASE.*` paths remain compatibility aliases, while `CASE.STAGES.*` is retained only as the legacy execution/evidence view.
 
-Flow sidecar (`templates/flows/common/compose/debug.yaml`):
+Flow sidecar (`flows/common/compose/debug.yaml`):
 
 ```yaml
 schemaVersion: att-debug/v1.0

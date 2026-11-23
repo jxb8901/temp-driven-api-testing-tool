@@ -22,8 +22,8 @@
 檔案：
 
 ```text
-packages/default/templates/flows/payments/offline-authorize/flow.yaml
-packages/default/templates/flows/payments/offline-settle/flow.yaml
+packages/default/flows/payments/offline-authorize/flow.yaml
+packages/default/flows/payments/offline-settle/flow.yaml
 packages/default/testcase/payments/offline-authorize/testcase.yaml
 packages/default/testcase/payments/offline-settle/testcase.yaml
 packages/default/testdata/payments-offline-settle.xlsx

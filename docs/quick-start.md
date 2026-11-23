@@ -71,7 +71,7 @@ inputs:
   expected: 100
 ```
 
-The Flow at `templates/flows/quick-start/flow.yaml` owns the Actions. The Test Case does not duplicate Steps or assert DSL.
+The Flow at `flows/quick-start/flow.yaml` owns the Actions. The Test Case does not duplicate Steps or assert DSL.
 
 ## Validate the Package
 

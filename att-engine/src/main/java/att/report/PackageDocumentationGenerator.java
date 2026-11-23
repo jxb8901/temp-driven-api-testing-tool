@@ -53,8 +53,13 @@ public final class PackageDocumentationGenerator {
 
     private String testcasePage(Path root, FrameworkConfig global, List<String> search) throws Exception {
         StringBuilder body = new StringBuilder("<h1>Testcases</h1><p><a href=\"../index.html\">Home</a></p>");
-        StageTemplateLoader templateLoader = new StageTemplateLoader(root, global.templatesRoot());
+        Path templatesDirectory = global.templatesRoot().isAbsolute()
+                ? global.templatesRoot() : root.resolve(global.templatesRoot());
+        StageTemplateLoader templateLoader = Files.isDirectory(templatesDirectory)
+                ? new StageTemplateLoader(root, global.templatesRoot()) : null;
         for (Path workbook : files(root.resolve(global.testcasesRoot()), ".xlsx")) {
+            if (templateLoader == null)
+                throw new IllegalArgumentException("Workbook documentation requires a Package templates/ root");
             if (!Files.isRegularFile(workbook.resolveSibling(workbook.getFileName().toString().replaceFirst("(?i)\\.xlsx$", ".yaml")))) continue;
             FrameworkConfig suite = new SuiteConfigResolver(root, global).resolve(workbook);
             List<TestCase> cases = new ExcelTestSuiteLoader(suite).load(workbook);
@@ -152,7 +157,7 @@ public final class PackageDocumentationGenerator {
 
     private String flowPage(Path root, FrameworkConfig config) throws Exception {
         StringBuilder body = new StringBuilder("<h1>Flows</h1><p>Static reusable Template Action groups using the calling Template Context.</p>");
-        att.flow.FlowRegistry registry = new att.flow.FlowRegistry(root, config.templatesRoot());
+        att.flow.FlowRegistry registry = new att.flow.FlowRegistry(root, config, true);
         for (att.flow.FlowDefinition flow : registry.all()) {
             body.append("<section class=\"doc-item\" data-search=\"").append(escape((flow.id()+" "+flow.name()+" "+flow.description()).toLowerCase(java.util.Locale.ROOT))).append("\" id=\"").append(anchor(flow.id())).append("\"><h2>").append(escape(flow.id())).append("</h2><p>").append(escape(flow.description())).append("</p>");
             body.append("<h3>Actions</h3><table><tr><th>Action</th><th>Type</th><th>Target</th></tr>");

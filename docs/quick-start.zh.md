@@ -71,7 +71,7 @@ inputs:
   expected: 100
 ```
 
-Actions 由 `templates/flows/quick-start/flow.yaml` 擁有；Test Case 不會再寫一套 Steps 或 assert DSL。
+Actions 由 `flows/quick-start/flow.yaml` 擁有；Test Case 不會再寫一套 Steps 或 assert DSL。
 
 ## 驗證 Package
 

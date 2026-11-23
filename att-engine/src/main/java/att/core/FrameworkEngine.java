@@ -107,7 +107,7 @@ public class FrameworkEngine {
 
         // Capture every source identity before creating output. A changed Definition or Flow
         // invalidates the resolution instead of executing inputs from one revision against another.
-        FlowRegistry flows = new FlowRegistry(projectRoot, config.templatesRoot(), false);
+        FlowRegistry flows = new FlowRegistry(projectRoot, config, false);
         List<Map<String,Object>> inputs = verifyNativeSources(resolution, selected, flows);
         NativeSourceWorkbookReportWriter.Prepared preparedSourceWorkbookReport =
                 NativeSourceWorkbookReportWriter.prepareIfRequested(projectRoot, resolution);

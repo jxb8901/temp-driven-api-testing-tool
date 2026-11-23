@@ -385,12 +385,12 @@ def documentation_ownership_errors(root, manifest_items):
             errors.append("missing " + rel)
             continue
         text = path.read_text(encoding="utf-8")
-        if "templates/flows/" not in text:
-            errors.append(rel + ": state that the current runtime discovers Flows under templates/flows/")
-        if "not yet supported" not in text and "尚未支援" not in text:
-            errors.append(rel + ": state that a standalone flows/ package is not yet supported")
         if "resources.flowRoot" not in text:
-            errors.append(rel + ": state that resources.flowRoot is not defined")
+            errors.append(rel + ": document resources.flowRoot")
+        if "flows/" not in text:
+            errors.append(rel + ": state that the canonical Flow root is flows/")
+        if "not yet supported" in text or "尚未支援" in text:
+            errors.append(rel + ": remove the pre-#430 standalone flows/ limitation")
 
     for rel in current_surfaces:
         path = root / rel

@@ -54,9 +54,9 @@ class LoadCrossModeTest {
         Path defaultPackage = findDefaultPackageRoot();
         for (String path : Arrays.asList(
                 "templates/V3_FLOW_EXAMPLE/template.yaml",
-                "templates/flows/common/compose/flow.yaml",
-                "templates/flows/common/identity/flow.yaml",
-                "templates/flows/common/decorate/flow.yaml")) {
+                "flows/common/compose/flow.yaml",
+                "flows/common/identity/flow.yaml",
+                "flows/common/decorate/flow.yaml")) {
             Path destination = project.resolve(path);
             Files.createDirectories(destination.getParent());
             Files.copy(defaultPackage.resolve(path), destination);

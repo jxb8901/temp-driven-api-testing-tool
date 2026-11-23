@@ -6,7 +6,7 @@
 
 這些資源沒有改寫成 `att-testcase/v1`。改寫會替換 Stage 選擇、`runWhen`／`onFailure` 或 workbook Case ID，而且沒有保留該行為的 golden。請在這裡執行 Run 與 Debug。除非 scenario 明確提供 business TestCase ID，否則不要把 `PAYMENT_*`、FPP Template 或本地付款 Template 當成 Quick 或 Advanced Load target。保留的 Template-target LOAD 範例位於 `examples/legacy/load/`，仍使用 target id `V3_FLOW_EXAMPLE`，並以這個 Package 為工作目錄執行。
 
-本 Package 的 `templates/flows/common/` 與 `tools/` 是這些 Template 在 package 內解析到的複本。Tool 與 Flow 查找不會跨到 `packages/default`。common Flow 與目前 Tool catalog 的現行正本仍在 `packages/default`。
+本 Package 的 `flows/common/` 與 `tools/` 是這些 Template 在 package 內解析到的複本。Tool 與 Flow 查找不會跨到 `packages/default`。common Flow 與目前 Tool catalog 的現行正本仍在 `packages/default`。
 
 從 repository root 執行的離線檢查。`./att.sh` 會進入 `ATT_PACKAGE_ROOT` 指定的 Package：
 

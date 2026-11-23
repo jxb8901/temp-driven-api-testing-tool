@@ -335,21 +335,20 @@ public final class SourceCandidateValidator {
         String selected = environment == null || environment.trim().isEmpty() ? "default" : environment.trim();
         FrameworkConfig effective = new FrameworkConfigLoader().loadDiscovery(config, runtime, pkg,
                 "default".equalsIgnoreCase(selected) ? null : selected);
-        if (!hasTemplateTree(pkg, effective.templatesRoot()))
-            return FileExpressionResolver.FileExpressionSnapshot.merge(pkg,
-                    Collections.<FileExpressionResolver.FileExpressionSnapshot>emptyList()).serialize();
-        StageTemplateLoader templates = new StageTemplateLoader(pkg, effective.templatesRoot(), false);
-        FlowRegistry flows = new FlowRegistry(pkg, effective.templatesRoot(), false);
+        FlowRegistry flows = new FlowRegistry(pkg, effective, false);
         List<FileExpressionResolver.FileExpressionSnapshot> snapshots = new ArrayList<FileExpressionResolver.FileExpressionSnapshot>();
-        for (String reference : templates.paths()) {
-            StageTemplate template;
-            try { template = templates.load(reference); }
-            catch (DiagnosticException invalidUnrelatedTemplate) {
-                // Whole-Package validation owns invalid descriptors. Keep them out of this
-                // execution snapshot so they do not block a separate valid target.
-                continue;
+        if (hasTemplateTree(pkg, effective.templatesRoot())) {
+            StageTemplateLoader templates = new StageTemplateLoader(pkg, effective.templatesRoot(), false);
+            for (String reference : templates.paths()) {
+                StageTemplate template;
+                try { template = templates.load(reference); }
+                catch (DiagnosticException invalidUnrelatedTemplate) {
+                    // Whole-Package validation owns invalid descriptors. Keep them out of this
+                    // execution snapshot so they do not block a separate valid target.
+                    continue;
+                }
+                snapshots.addAll(fileActionSnapshots(pkg, template, flows));
             }
-            snapshots.addAll(fileActionSnapshots(pkg, template, flows));
         }
         for (String flowId : flows.ids()) {
             FlowDefinition flow;
@@ -649,21 +648,22 @@ public final class SourceCandidateValidator {
     private static void collectFileDependencies(Path packageRoot, String packageId, String environment,
                                                FrameworkConfig config,
                                                List<DependencyReference> output) throws Exception {
-        if(!hasTemplateTree(packageRoot,config.templatesRoot()))return;
-        StageTemplateLoader templates = new StageTemplateLoader(packageRoot, config.templatesRoot(), false);
-        FlowRegistry flows = new FlowRegistry(packageRoot, config.templatesRoot(), false);
+        FlowRegistry flows = new FlowRegistry(packageRoot, config, false);
         Map<String, DependencyReference> found = new LinkedHashMap<String, DependencyReference>();
-        for (String reference : templates.paths()) {
-            StageTemplate template;
-            try { template = templates.load(reference); }
-            catch (DiagnosticException invalidUnrelatedTemplate) {
-                // Whole-Package validation reports bad descriptors. An unrelated invalid
-                // Template is not part of another Job's immutable execution closure.
-                continue;
+        if (hasTemplateTree(packageRoot, config.templatesRoot())) {
+            StageTemplateLoader templates = new StageTemplateLoader(packageRoot, config.templatesRoot(), false);
+            for (String reference : templates.paths()) {
+                StageTemplate template;
+                try { template = templates.load(reference); }
+                catch (DiagnosticException invalidUnrelatedTemplate) {
+                    // Whole-Package validation reports bad descriptors. An unrelated invalid
+                    // Template is not part of another Job's immutable execution closure.
+                    continue;
+                }
+                for (FileExpressionResolver.FileExpressionSnapshot snapshot : fileActionSnapshots(
+                        packageRoot, template, flows))
+                    collectFilePlans(packageRoot, packageId, environment, snapshot, found);
             }
-            for (FileExpressionResolver.FileExpressionSnapshot snapshot : fileActionSnapshots(
-                    packageRoot, template, flows))
-                collectFilePlans(packageRoot, packageId, environment, snapshot, found);
         }
         for (String flowId : flows.ids()) {
             FlowDefinition flow;
@@ -873,6 +873,7 @@ public final class SourceCandidateValidator {
         putSemantic(result, "environment", effective.environment());
         putSemantic(result, "timeoutMs", Integer.valueOf(effective.timeoutMs()));
         putSemantic(result, "resources.templatesRoot", portablePath(packageRoot, effective.templatesRoot()));
+        putSemantic(result, "resources.flowRoot", portablePath(packageRoot, effective.flowRoot()));
         putSemantic(result, "resources.testcaseRoot", portablePath(packageRoot, effective.testcasesRoot()));
         putSemantic(result, "report.mode", effective.report().mode());
         putSemantic(result, "report.fileNamePattern", effective.report().fileNamePattern());

@@ -713,13 +713,13 @@ def check_critical_examples():
     assets = (
         "packages/legacy/testcase/payment2.xlsx",
         "packages/legacy/templates/PAYMENT_INVOKE/debug.yaml",
-        "packages/default/templates/flows/quick-start/flow.yaml",
+        "packages/default/flows/quick-start/flow.yaml",
         "packages/default/testcase/quick-start/single/testcase.yaml",
         "packages/default/testcase/quick-start/inline-multi/testcase.yaml",
         "packages/default/testcase/quick-start/excel/testcase.yaml",
         "packages/default/testdata/quick-start-native.xlsx",
-        "packages/default/templates/flows/payments/offline-authorize/flow.yaml",
-        "packages/default/templates/flows/payments/offline-settle/flow.yaml",
+        "packages/default/flows/payments/offline-authorize/flow.yaml",
+        "packages/default/flows/payments/offline-settle/flow.yaml",
         "packages/default/testcase/payments/offline-authorize/testcase.yaml",
         "packages/default/testcase/payments/offline-settle/testcase.yaml",
         "packages/default/testdata/payments-offline-settle.xlsx",
@@ -886,7 +886,7 @@ def check_example_inventory():
                 fail("blocked inventory entry needs its own file-specific blocker: %s" % rel)
         if status == "current" and (rel.startswith("examples/legacy/") or rel.startswith("packages/legacy/")):
             fail("current inventory entry points at a legacy location: %s" % rel)
-        if "/templates/flows/common/" in rel:
+        if "/flows/common/" in rel:
             if runtime != "executable-flow" or ci_runnable:
                 fail("common Flow must stay executable and outside the offline native-suite fixture set: %s" % rel)
             if rel.startswith("packages/legacy/") and status != "legacy":

@@ -137,10 +137,10 @@ public final class PackageValidator {
                 if (tool.callBacked()) validateCallBackedDefinition(tool, global);
                 else validateToolExecutable(tool);
             } else if ("template".equals(normalizedType) || "flow".equals(normalizedType)) {
-                StageTemplateLoader loader = new StageTemplateLoader(projectRoot, global.templatesRoot(), false);
-                flows = new att.flow.FlowRegistry(projectRoot, global.templatesRoot(), false);
+                flows = new att.flow.FlowRegistry(projectRoot, global, false);
                 StageTemplate target;
                 if ("template".equals(normalizedType)) {
+                    StageTemplateLoader loader = new StageTemplateLoader(projectRoot, global.templatesRoot(), false);
                     target = loader.loadSelected(id);
                 } else {
                     att.flow.FlowDefinition flow = flows.get(id);
@@ -200,14 +200,21 @@ public final class PackageValidator {
         Map<String, Path> workbookIds = new LinkedHashMap<String, Path>();
         Map<String, CaseLocation> fullCaseIds = new LinkedHashMap<String, CaseLocation>();
         SuiteConfigResolver resolver = new SuiteConfigResolver(projectRoot, global);
-        StageTemplateLoader loader;
-        try { loader = new StageTemplateLoader(projectRoot, global.templatesRoot()); }
-        catch (Exception e) { return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, global.templatesRoot()))); }
-        try { flows = new att.flow.FlowRegistry(projectRoot, global.templatesRoot(), "package".equals(options.validationScope())); }
-        catch (Exception e) { return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, global.templatesRoot().resolve("flows")))); }
+        StageTemplateLoader loader = null;
+        Path templatesDirectory = global.templatesRoot().isAbsolute()
+                ? global.templatesRoot() : projectRoot.resolve(global.templatesRoot());
+        if (java.nio.file.Files.isDirectory(templatesDirectory)) {
+            try { loader = new StageTemplateLoader(projectRoot, global.templatesRoot()); }
+            catch (Exception e) { return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, global.templatesRoot()))); }
+        }
+        try { flows = new att.flow.FlowRegistry(projectRoot, global, "package".equals(options.validationScope())); }
+        catch (Exception e) {
+            Path flowDiag = global.flowRoot() == null ? global.templatesRoot().resolve("flows") : global.flowRoot();
+            return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, flowDiag)));
+        }
         if ("package".equals(options.validationScope())) {
             validatePackageLayout(options, diagnostics);
-            for (String reference : loader.paths()) try {
+            if (loader != null) for (String reference : loader.paths()) try {
                 templates.add(reference);
                 StageTemplate template = loader.load(reference);
                 addContextMigrationWarnings(diagnostics, template);
@@ -252,6 +259,8 @@ public final class PackageValidator {
                             validateTestdataMapping(stage.values(), config, Collections.<Path>emptyList(), resolved,
                                     "inputs.stage." + stage.key(),
                                     att.core.ExecutionBootstrapVariables.InputMappingMode.TESTCASE, null);
+                            if (loader == null) throw new IllegalArgumentException(
+                                    "Workbook Stages require a Package templates/ root; this Package has no Templates directory");
                             StageTemplate template = loader.load(stage.templateName());
                             addCaseContextMigrationWarnings(diagnostics, template, testCase, stage, config,
                                     resolved, assignedCaseVariables);
@@ -283,7 +292,7 @@ public final class PackageValidator {
         att.debug.DebugEngine debug = new att.debug.DebugEngine(projectRoot, runtimeConfigPath, global,
                 new att.exec.IbmMqClientFactory(), true, Collections.<String>emptyList(), Collections.<String>emptyList());
         for (String id : global.tools().keySet()) validateDebugSidecar(debug, "tool", id, diagnostics);
-        for (String id : loader.paths()) validateDebugSidecar(debug, "template", id, diagnostics);
+        if (loader != null) for (String id : loader.paths()) validateDebugSidecar(debug, "template", id, diagnostics);
         for (att.flow.FlowDefinition flow : flows.all()) validateDebugSidecar(debug, "flow", flow.id(), diagnostics);
     }
 

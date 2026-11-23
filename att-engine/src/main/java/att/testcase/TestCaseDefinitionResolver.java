@@ -402,11 +402,24 @@ public final class TestCaseDefinitionResolver {
             Path templatesRoot, PackageResourceResolver resources, String sourceReference, Options options) throws Exception {
         Path templates = templatesRoot == null ? packageRoot.resolve("templates")
                 : templatesRoot.isAbsolute() ? templatesRoot : packageRoot.resolve(templatesRoot);
-        Path templatesCandidate = resources.internalCandidate(templates);
-        Path flowRootCandidate = templatesCandidate.resolve("flows").normalize();
-        Path flowRoot = resources.internalCandidate(flowRootCandidate);
-        FlowTreeSnapshot flowSnapshots = preflightFlowTree(flowRoot, resources, sourceReference, options);
+        att.flow.PackageFlowRoots.Resolution resolution = att.flow.PackageFlowRoots.resolve(
+                packageRoot, att.flow.PackageFlowRoots.DEFAULT_FLOW_ROOT, templatesRoot);
+        FlowTreeSnapshot flowSnapshots = preflightFlowTrees(resolution.existingRoots(), resources, sourceReference, options);
         return resolveCapturedFlows(flowId, packageRoot, templates, sourceReference, flowSnapshots, options);
+    }
+
+    private FlowTreeSnapshot preflightFlowTrees(List<Path> flowRoots, PackageResourceResolver resources,
+            String sourceReference, Options options) throws Exception {
+        Map<Path,byte[]> snapshots = new LinkedHashMap<Path,byte[]>();
+        Map<Path,String> logicalNames = new LinkedHashMap<Path,String>();
+        Set<Path> templateDescriptors = new LinkedHashSet<Path>();
+        for (Path flowRoot : flowRoots) {
+            FlowTreeSnapshot part = preflightFlowTree(flowRoot, resources, sourceReference, options);
+            snapshots.putAll(part.sources);
+            logicalNames.putAll(part.logicalNames);
+            templateDescriptors.addAll(part.templateDescriptors);
+        }
+        return new FlowTreeSnapshot(snapshots, logicalNames, templateDescriptors);
     }
 
     List<ResolvedTestCase.FlowDependency> resolveCapturedFlows(String flowId, Path packageRoot, Path templates,

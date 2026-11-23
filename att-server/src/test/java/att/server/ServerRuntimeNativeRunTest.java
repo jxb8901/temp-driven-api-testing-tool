@@ -33,7 +33,7 @@ class ServerRuntimeNativeRunTest {
     @Test void nativeSuiteRetryRejectsWorkbookOnlyChangeWithStableCaseIdentity() throws Exception {
         Path allowed=Files.createDirectories(temp.resolve("excel-retry-allowed"));
         Path packageRoot=Files.createDirectories(allowed.resolve("p"));
-        Path flow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+        Path flow=Files.createDirectories(packageRoot.resolve("flows/payments/transfer/v1"))
                 .resolve("flow.yaml");
         Files.createDirectories(packageRoot.resolve("testcase/payments"));
         Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
@@ -100,7 +100,7 @@ class ServerRuntimeNativeRunTest {
     @Test void validatesExactNativeSelectionRejectsStaleDraftAndRunsAcceptedSourceSnapshot() throws Exception {
         Path allowed=Files.createDirectories(temp.resolve("allowed"));
         Path packageRoot=Files.createDirectories(allowed.resolve("p"));
-        Path flow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+        Path flow=Files.createDirectories(packageRoot.resolve("flows/payments/transfer/v1"))
                 .resolve("flow.yaml");
         Files.createDirectories(packageRoot.resolve("testcase/payments/transfer"));
         Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
@@ -361,7 +361,7 @@ class ServerRuntimeNativeRunTest {
             assertEquals("FAIL",((Map<?,?>)scheduledResult.get("job")).get("status"),scheduledResult.toString());
             assertNativeCaseStatus(runtime,scheduledJobId,"payments.transfer.second","FAIL");
 
-            Path errorFlow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/error/v1"))
+            Path errorFlow=Files.createDirectories(packageRoot.resolve("flows/payments/error/v1"))
                     .resolve("flow.yaml");
             Files.writeString(errorFlow,"schemaVersion: att-flow/v3.6\nid: payments.error.v1\nname: Error outcome\n"
                     +"description: Native Case ERROR outcome fixture\nactions:\n  call:\n    type: tool\n"
@@ -387,7 +387,7 @@ class ServerRuntimeNativeRunTest {
     @Test void reversedMultiCaseSelectionUsesSourceOrderForPreviewAndFailFast() throws Exception {
         Path allowed=Files.createDirectories(temp.resolve("allowed"));
         Path packageRoot=Files.createDirectories(allowed.resolve("p"));
-        Path flow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+        Path flow=Files.createDirectories(packageRoot.resolve("flows/payments/transfer/v1"))
                 .resolve("flow.yaml");
         Files.createDirectories(packageRoot.resolve("testcase/payments/transfer"));
         Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
@@ -451,9 +451,9 @@ class ServerRuntimeNativeRunTest {
     @Test void implicitSuiteDraftFreezesSelectionForJobsAndSchedules() throws Exception {
         Path allowed=Files.createDirectories(temp.resolve("suite-allowed"));
         Path packageRoot=Files.createDirectories(allowed.resolve("p"));
-        Path transferFlow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+        Path transferFlow=Files.createDirectories(packageRoot.resolve("flows/payments/transfer/v1"))
                 .resolve("flow.yaml");
-        Path refundFlow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/refund/v1"))
+        Path refundFlow=Files.createDirectories(packageRoot.resolve("flows/payments/refund/v1"))
                 .resolve("flow.yaml");
         String flow="schemaVersion: att-flow/v3.6\nid: %s\nname: %s\ndescription: Native Suite fixture\nactions:\n"
                 +"  verify: {type: assert, assert: '#{\u0024{EXEC.INPUT.amount} <= 13}'}\n"
@@ -551,7 +551,7 @@ class ServerRuntimeNativeRunTest {
     @Test void nativeSuiteRerunFailedFreezesOwnedSourceAndRetriesOnlyExecutedFailedCases() throws Exception {
         Path allowed=Files.createDirectories(temp.resolve("retry-allowed"));
         Path packageRoot=Files.createDirectories(allowed.resolve("p"));
-        Path flow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+        Path flow=Files.createDirectories(packageRoot.resolve("flows/payments/transfer/v1"))
                 .resolve("flow.yaml");
         Files.createDirectories(packageRoot.resolve("testcase/payments/transfer"));
         Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
@@ -681,7 +681,7 @@ class ServerRuntimeNativeRunTest {
     @Test void nativeCaseReplayStrictRejectsMutationAndCurrentRetainsSelectionWithLineage() throws Exception {
         Path allowed=Files.createDirectories(temp.resolve("allowed"));
         Path packageRoot=Files.createDirectories(allowed.resolve("p"));
-        Path flow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+        Path flow=Files.createDirectories(packageRoot.resolve("flows/payments/transfer/v1"))
                 .resolve("flow.yaml");
         Files.createDirectories(packageRoot.resolve("testcase/payments/transfer"));
         Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"

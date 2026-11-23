@@ -39,8 +39,8 @@ class NativePaymentsExampleTest {
     void guidesAndPackagedFilesNameTheResolvedCases() throws Exception {
         Path root = repoRoot();
         for (String relative : Arrays.asList(
-                "packages/default/templates/flows/payments/offline-authorize/flow.yaml",
-                "packages/default/templates/flows/payments/offline-settle/flow.yaml",
+                "packages/default/flows/payments/offline-authorize/flow.yaml",
+                "packages/default/flows/payments/offline-settle/flow.yaml",
                 "packages/default/testcase/payments/offline-authorize/testcase.yaml",
                 "packages/default/testcase/payments/offline-settle/testcase.yaml",
                 "packages/default/testdata/payments-offline-settle.xlsx",

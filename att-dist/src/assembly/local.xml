@@ -15,12 +15,13 @@
     </files>
     <fileSets>
         <fileSet><directory>${project.basedir}/../config</directory><outputDirectory>config</outputDirectory></fileSet>
-        <fileSet><directory>${project.basedir}/../packages/default/templates</directory><outputDirectory>packages/default/templates</outputDirectory></fileSet>
+        <fileSet><directory>${project.basedir}/../packages/default/flows</directory><outputDirectory>packages/default/flows</outputDirectory></fileSet>
         <fileSet><directory>${project.basedir}/../packages/default/tools</directory><outputDirectory>packages/default/tools</outputDirectory><fileMode>0755</fileMode></fileSet>
         <fileSet><directory>${project.basedir}/../packages/default/testcase</directory><outputDirectory>packages/default/testcase</outputDirectory></fileSet>
         <fileSet><directory>${project.basedir}/../packages/default/testdata</directory><outputDirectory>packages/default/testdata</outputDirectory></fileSet>
         <fileSet><directory>${project.basedir}/../packages/default/sql</directory><outputDirectory>packages/default/sql</outputDirectory></fileSet>
         <fileSet><directory>${project.basedir}/../packages/legacy/templates</directory><outputDirectory>packages/legacy/templates</outputDirectory></fileSet>
+        <fileSet><directory>${project.basedir}/../packages/legacy/flows</directory><outputDirectory>packages/legacy/flows</outputDirectory></fileSet>
         <fileSet><directory>${project.basedir}/../packages/legacy/tools</directory><outputDirectory>packages/legacy/tools</outputDirectory><fileMode>0755</fileMode></fileSet>
         <fileSet><directory>${project.basedir}/../packages/legacy/testcase</directory><outputDirectory>packages/legacy/testcase</outputDirectory></fileSet>
         <!-- Raw PR benchmark captures remain in Git and the source archive; keep them out of the size-capped Local release bundle. -->

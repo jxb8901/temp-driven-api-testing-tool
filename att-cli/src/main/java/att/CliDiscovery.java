@@ -119,7 +119,7 @@ public final class CliDiscovery {
             } catch (Exception ignored) { }
         }
 
-        FlowRegistry flows = new FlowRegistry(canonicalRoot, config.templatesRoot(), false);
+        FlowRegistry flows = new FlowRegistry(canonicalRoot, config, false);
         for (String id : flows.ids()) addDebugTarget(targets, engine, canonicalRoot, "flow", id);
         sortTargets(targets);
         return targets;
@@ -143,7 +143,7 @@ public final class CliDiscovery {
             } catch (Exception ignored) { }
         }
 
-        FlowRegistry flows = new FlowRegistry(canonicalRoot, config.templatesRoot(), false);
+        FlowRegistry flows = new FlowRegistry(canonicalRoot, config, false);
         for (String id : flows.ids()) addQuickLoadTarget(targets, engine, canonicalRoot, "flow", id, id, quickLoadPolicy);
         sortTargets(targets);
         return targets;

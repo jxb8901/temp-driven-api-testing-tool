@@ -34,7 +34,7 @@ class QuickStartDocumentationTest {
         Path legacyRoot = root.resolve("packages/legacy");
 
         for (String relative : Arrays.asList(
-                "templates/flows/quick-start/flow.yaml",
+                "flows/quick-start/flow.yaml",
                 "testcase/quick-start/single/testcase.yaml",
                 "testcase/quick-start/inline-multi/testcase.yaml",
                 "testcase/quick-start/excel/testcase.yaml",

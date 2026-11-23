@@ -20,6 +20,7 @@ public final class FrameworkConfig {
     private final String environment;
     private final int timeoutMs;
     private final Path templatesRoot;
+    private final Path flowRoot;
     private final Path testcasesRoot;
     private final Map<String, ToolConfig> tools;
     private final Map<String, DbHelperConfig> dbHelpers;
@@ -189,6 +190,7 @@ public final class FrameworkConfig {
         this.environment = environment == null ? "SIT" : environment;
         this.timeoutMs = timeoutMs;
         this.templatesRoot = templatesRoot == null ? Paths.get("templates") : templatesRoot;
+        this.flowRoot = Paths.get("flows");
         this.testcasesRoot = testcasesRoot == null ? Paths.get("testcase") : testcasesRoot;
         this.tools = tools == null ? Collections.<String, ToolConfig>emptyMap() : new LinkedHashMap<String, ToolConfig>(tools);
         this.dbHelpers = dbHelpers == null ? Collections.<String, DbHelperConfig>emptyMap() : new LinkedHashMap<String, DbHelperConfig>(dbHelpers);
@@ -224,6 +226,7 @@ public final class FrameworkConfig {
         this.environment = source.environment;
         this.timeoutMs = source.timeoutMs;
         this.templatesRoot = source.templatesRoot;
+        this.flowRoot = source.flowRoot;
         this.testcasesRoot = source.testcasesRoot;
         this.tools = source.tools;
         this.dbHelpers = source.dbHelpers;
@@ -255,6 +258,7 @@ public final class FrameworkConfig {
         this.environment = source.environment;
         this.timeoutMs = source.timeoutMs;
         this.templatesRoot = source.templatesRoot;
+        this.flowRoot = source.flowRoot;
         this.testcasesRoot = source.testcasesRoot;
         this.tools = source.tools;
         this.dbHelpers = source.dbHelpers;
@@ -289,6 +293,7 @@ public final class FrameworkConfig {
         this.environment = source.environment;
         this.timeoutMs = pkg.timeoutMs() == null ? source.timeoutMs : pkg.timeoutMs();
         this.templatesRoot = pkg.templatesRoot();
+        this.flowRoot = pkg.flowRoot();
         this.testcasesRoot = pkg.testcaseRoot();
         this.tools = source.tools;
         this.dbHelpers = source.dbHelpers;
@@ -335,6 +340,7 @@ public final class FrameworkConfig {
     public String environment() { return environment; }
     public int timeoutMs() { return timeoutMs; }
     public Path templatesRoot() { return templatesRoot; }
+    public Path flowRoot() { return flowRoot; }
     public Path testcasesRoot() { return testcasesRoot; }
     public Map<String, ToolConfig> tools() { return Collections.unmodifiableMap(tools); }
     public ToolConfig tool(String key) { return tools.get(key); }

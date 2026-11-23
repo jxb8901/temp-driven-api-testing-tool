@@ -62,7 +62,7 @@ class ExampleInventoryContractTest {
             if ("current".equals(status)) {
                 assertFalse(path.startsWith("examples/legacy/") || path.startsWith("packages/legacy/"), path);
             }
-            if (path.contains("/templates/flows/common/")) {
+            if (path.contains("/flows/common/")) {
                 assertEquals("executable-flow", runtime);
                 assertEquals(Boolean.FALSE, entry.get("ciRunnable"));
                 assertEquals(path.startsWith("packages/legacy/") ? "legacy" : "current", status);
@@ -81,9 +81,11 @@ class ExampleInventoryContractTest {
         assertTrue(executable, "offline Native Suite fixture set must be marked ciRunnable");
         assertTrue(planned, "planned work must stay in the inventory and out of the executable set");
         List<String> missing = new ArrayList<String>();
-        for (String base : Arrays.asList("packages/default/templates", "packages/default/testcase",
+        for (String base : Arrays.asList("packages/default/flows", "packages/default/testcase",
                 "packages/default/testdata", "packages/default/tools", "packages/legacy", "examples")) {
-            for (Path file : (Iterable<Path>) Files.walk(root.resolve(base))::iterator) {
+            Path basePath = root.resolve(base);
+            if (!Files.isDirectory(basePath)) continue;
+            for (Path file : (Iterable<Path>) Files.walk(basePath)::iterator) {
                 if (Files.isRegularFile(file)) {
                     String relative = root.relativize(file).toString().replace('\\', '/');
                     if (!covered.contains(relative)) missing.add(relative);

@@ -6,7 +6,7 @@ Package ID 與實體根目錄來自可信註冊或既有 Local Package 選取。
 
 ## 宣告 Package 預設值
 
-現行 runtime 在 `<PACKAGE_ROOT>/<templatesRoot>/flows/` 發現 Flow 檔案（預設 `templates/flows/`）。獨立的 `flows/` 目錄尚未支援。現行 `att-package/v2` schema 有 `resources.templatesRoot`，沒有 `resources.flowRoot`。
+現行 runtime 在 `<PACKAGE_ROOT>/<flowRoot>/` 發現 Flow 檔案（預設 `flows/`）。`resources.flowRoot` 屬於 `att-package/v2`。遷移期間既有 Package 仍可把 Flow 放在 `<templatesRoot>/flows/`；兩個根目錄出現相同 Flow ID 時會拒絕。
 
 此範例選取中央既有 profile，並宣告 Package 自己的 Testdata。執行完整驗證前，先建立引用的 descriptor。
 
@@ -17,6 +17,7 @@ metadata:
   description: Payment regression resources
 defaultEnvironment: SIT
 resources:
+  flowRoot: flows
   templatesRoot: templates
   testcaseRoot: testcase
 testdata:
@@ -45,9 +46,9 @@ defaults:
 
 所有路徑使用 `/`，相對於已選取 Package。絕對路徑、`..`、不安全 symlink 及越界路徑均會被拒絕。檔案上限為 262144 UTF-8 bytes。未知欄位、重複 YAML keys、aliases、anchors 及 `x-` extensions 均不允許。
 
-沒有 Manifest 時，Package 在 `templates/flows/` 發現 Flow，Test Case Definition 使用 `testcase/`，Package Testdata inventory 為空。獨立的 `flows/` Package 尚未支援。
+沒有 Manifest 時，Package 在 `flows/`（以及仍存在的 `templates/flows/` 遷移相容根）發現 Flow，Test Case Definition 使用 `testcase/`，Package Testdata inventory 為空。Native Package 可以完全省略 `templates/`。
 
-現行 Flow 目錄（`templates/flows/`）、Test Case Definition 及 `load/` roots 可在 inspection 時省略。目錄不存在時，Explorer、LOAD Catalog 及 Quick Load 會為該根目錄回傳空 inventory。若已設定或慣例根目錄存在，但不是可讀目錄或解析後超出 canonical Package，檢查會回傳已淨化的 `ATT-RESOURCE-ROOT-INVALID` 診斷；不會跟隨不安全路徑，也不會把存在但無效的目錄當成空目錄。
+現行 Flow root（`flows/`）、Test Case Definition 及 `load/` roots 可在 inspection 時省略。目錄不存在時，Explorer、LOAD Catalog 及 Quick Load 會為該根目錄回傳空 inventory。若已設定或慣例根目錄存在，但不是可讀目錄或解析後超出 canonical Package，檢查會回傳已淨化的 `ATT-RESOURCE-ROOT-INVALID` 診斷；不會跟隨不安全路徑，也不會把存在但無效的目錄當成空目錄。
 
 ## 解析 Environment
 

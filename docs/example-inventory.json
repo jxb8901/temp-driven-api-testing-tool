@@ -200,7 +200,7 @@
     },
     {
       "id": "asset-015",
-      "path": "packages/default/templates/flows/common/compose/flow.yaml",
+      "path": "packages/default/flows/common/compose/flow.yaml",
       "status": "current",
       "kind": "flow-helper",
       "owner": "default-package",
@@ -214,7 +214,7 @@
     },
     {
       "id": "asset-016",
-      "path": "packages/default/templates/flows/common/decorate/flow.yaml",
+      "path": "packages/default/flows/common/decorate/flow.yaml",
       "status": "current",
       "kind": "flow-helper",
       "owner": "default-package",
@@ -228,7 +228,7 @@
     },
     {
       "id": "asset-017",
-      "path": "packages/default/templates/flows/common/identity/flow.yaml",
+      "path": "packages/default/flows/common/identity/flow.yaml",
       "status": "current",
       "kind": "flow-helper",
       "owner": "default-package",
@@ -242,7 +242,7 @@
     },
     {
       "id": "asset-018",
-      "path": "packages/default/templates/flows/payments/offline-authorize/flow.yaml",
+      "path": "packages/default/flows/payments/offline-authorize/flow.yaml",
       "status": "current",
       "kind": "native-suite",
       "owner": "default-package",
@@ -256,7 +256,7 @@
     },
     {
       "id": "asset-019",
-      "path": "packages/default/templates/flows/payments/offline-settle/flow.yaml",
+      "path": "packages/default/flows/payments/offline-settle/flow.yaml",
       "status": "current",
       "kind": "native-suite",
       "owner": "default-package",
@@ -270,7 +270,7 @@
     },
     {
       "id": "asset-020",
-      "path": "packages/default/templates/flows/quick-start/flow.yaml",
+      "path": "packages/default/flows/quick-start/flow.yaml",
       "status": "current",
       "kind": "native-quick-start",
       "owner": "default-package",
@@ -1783,7 +1783,7 @@
     },
     {
       "id": "asset-127",
-      "path": "packages/legacy/templates/flows/common/compose/flow.yaml",
+      "path": "packages/legacy/flows/common/compose/flow.yaml",
       "status": "legacy",
       "kind": "dependency-copy",
       "owner": "legacy-package",
@@ -1797,7 +1797,7 @@
     },
     {
       "id": "asset-128",
-      "path": "packages/legacy/templates/flows/common/decorate/flow.yaml",
+      "path": "packages/legacy/flows/common/decorate/flow.yaml",
       "status": "legacy",
       "kind": "dependency-copy",
       "owner": "legacy-package",
@@ -1811,7 +1811,7 @@
     },
     {
       "id": "asset-129",
-      "path": "packages/legacy/templates/flows/common/identity/flow.yaml",
+      "path": "packages/legacy/flows/common/identity/flow.yaml",
       "status": "legacy",
       "kind": "dependency-copy",
       "owner": "legacy-package",

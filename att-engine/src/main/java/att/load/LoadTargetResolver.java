@@ -27,11 +27,13 @@ public final class LoadTargetResolver {
 
     public LoadTarget resolve(LoadScenario scenario) throws Exception {
         try {
-            StageTemplateLoader templates = new StageTemplateLoader(projectRoot, config.templatesRoot(), false);
-            FlowRegistry flows = new FlowRegistry(projectRoot, config.templatesRoot(), false);
+            FlowRegistry flows = new FlowRegistry(projectRoot, config, false);
             String type = scenario.targetType();
             String id = scenario.targetId();
-            if ("template".equals(type)) return new LoadTarget(type, id, templates.loadSelected(id), flows, config.templatesRoot(), scenario.source()).withScenario(scenario);
+            if ("template".equals(type)) {
+                StageTemplateLoader templates = new StageTemplateLoader(projectRoot, config.templatesRoot(), false);
+                return new LoadTarget(type, id, templates.loadSelected(id), flows, config.templatesRoot(), scenario.source()).withScenario(scenario);
+            }
             if ("flow".equals(type)) {
                 FlowDefinition flow = flows.get(id);
                 if (flow == null) throw new IllegalArgumentException("Unknown Flow '" + id + "'");
