@@ -2757,17 +2757,29 @@ public final class PackageValidator {
             return 0;
         }
         att.testcase.TestCaseDefinitionResolver resolver = new att.testcase.TestCaseDefinitionResolver(schema);
-        att.testcase.TestCaseDefinitionResolver.Options sharedOptions;
+        att.testcase.TestCaseDefinitionResolver.Options sharedOptions =
+                att.testcase.TestCaseDefinitionResolver.Options.defaults();
+        java.util.Set<String> identityFailedLogicalNames = java.util.Collections.emptySet();
         try {
-            sharedOptions = resolver.preparePackageValidationOptions(projectRoot, global.flowRoot(),
-                    global.templatesRoot(), definitions, att.testcase.TestCaseDefinitionResolver.Options.defaults());
+            att.testcase.TestCaseDefinitionResolver.PackageValidationCaches caches =
+                    resolver.preparePackageValidationOptions(projectRoot, global.flowRoot(),
+                            global.templatesRoot(), att.testcase.TestCaseDefinitionResolver.Options.defaults());
+            sharedOptions = caches.options();
+            identityFailedLogicalNames = caches.failedLogicalNames();
+            for (att.validation.DiagnosticException identityError : caches.identityDiagnostics())
+                diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, identityError, directory));
         } catch (Exception error) {
+            // Hard package-wide identity bounds failed; fall back to isolated per-Definition resolution.
             diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, error, directory));
-            return 0;
+            sharedOptions = att.testcase.TestCaseDefinitionResolver.Options.defaults();
         }
         int resolvedCases = 0;
+        att.resource.PackageResourceResolver resources = new att.resource.PackageResourceResolver(projectRoot);
         for (Path definition : definitions) {
             try {
+                String logicalName = resources.fromInternalPath(definition, att.resource.PackageResourceResolver.Kind.FILE)
+                        .logicalName();
+                if (identityFailedLogicalNames.contains(logicalName)) continue;
                 att.testcase.TestCaseResolutionResult result = resolver.resolve(definition, "package", projectRoot,
                         global.flowRoot(), global.templatesRoot(), sharedOptions);
                 for (att.testcase.ResolvedTestCase testCase : result.selectedCases()) {

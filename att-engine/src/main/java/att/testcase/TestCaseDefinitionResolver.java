@@ -72,26 +72,43 @@ public final class TestCaseDefinitionResolver {
     /**
      * Builds shared Package-validation caches (Definition identity index + Flow tree snapshot) once
      * for reuse across every Native Definition resolve in {@code validate --package}.
+     * The identity index scans the whole Package (same scope as RUN identity checks), recording
+     * per-file identity diagnostics without aborting independent Definition validations.
      */
-    public Options preparePackageValidationOptions(Path packageRoot, Path flowRoot, Path templatesRoot,
-            List<Path> definitionPaths, Options base) throws Exception {
+    public PackageValidationCaches preparePackageValidationOptions(Path packageRoot, Path flowRoot,
+            Path templatesRoot, Options base) throws Exception {
         Options options = base == null ? Options.defaults() : base;
-        DefinitionIdentityIndex identityIndex = buildDefinitionIdentityIndex(packageRoot, definitionPaths, options);
+        IdentityCatalogResult catalog = buildPackageIdentityCatalog(packageRoot, options, true);
         PackageResourceResolver resources = new PackageResourceResolver(packageRoot);
         att.flow.PackageFlowRoots.Resolution resolution = att.flow.PackageFlowRoots.resolve(
                 resources.packageRoot(), flowRoot == null ? att.flow.PackageFlowRoots.DEFAULT_FLOW_ROOT : flowRoot,
                 templatesRoot);
         flowTreePreflightScans++;
         FlowTreeSnapshot flowTree = preflightFlowTrees(resolution.existingRoots(), resources, "package", options);
-        return options.withPackageCaches(identityIndex, flowTree);
+        return new PackageValidationCaches(options.withPackageCaches(catalog.index(), flowTree), catalog);
     }
 
-    /** Builds a case-folded Definition identity index from an already discovered Definition path list. */
+    /**
+     * @deprecated Prefer {@link #preparePackageValidationOptions(Path, Path, Path, Options)}; the path list
+     * is ignored because identity scope is always the whole Package.
+     */
+    @Deprecated
+    public Options preparePackageValidationOptions(Path packageRoot, Path flowRoot, Path templatesRoot,
+            List<Path> definitionPaths, Options base) throws Exception {
+        return preparePackageValidationOptions(packageRoot, flowRoot, templatesRoot, base).options();
+    }
+
+    /**
+     * Builds a case-folded Definition identity index from an already discovered Definition path list.
+     * Prefer {@link #buildPackageIdentityCatalog(Path, Options, boolean)} for Package-wide scope.
+     */
     public DefinitionIdentityIndex buildDefinitionIdentityIndex(Path packageRoot, List<Path> definitionPaths,
             Options options) throws Exception {
         Options effective = options == null ? Options.defaults() : options;
         PackageResourceResolver resources = new PackageResourceResolver(packageRoot);
         Map<String,String> idsByFoldedValue = new LinkedHashMap<String,String>();
+        Map<String,String> preservedIdsByFoldedValue = new LinkedHashMap<String,String>();
+        Set<String> ambiguousFoldedIds = new LinkedHashSet<String>();
         long definitionBytes = 0L;
         int definitions = 0;
         identityCatalogScans++;
@@ -114,6 +131,8 @@ public final class TestCaseDefinitionResolver {
             String folded = asciiFold(otherId);
             String previous = idsByFoldedValue.put(folded, resource.logicalName());
             if (previous != null) {
+                idsByFoldedValue.put(folded, previous);
+                ambiguousFoldedIds.add(folded);
                 throw DiagnosticException.of(DiagnosticCodes.TESTCASE_INVALID,
                         "Package Test Case Definition IDs are ambiguous",
                         "Definition ID '" + otherId + "' collides under ASCII case folding between '"
@@ -121,8 +140,110 @@ public final class TestCaseDefinitionResolver {
                         "Assign each testcase.yaml a unique case-preserving ID within this Package.")
                         .withLocation(resource.logicalName(), "id", null, null, null, null, null);
             }
+            preservedIdsByFoldedValue.put(folded, otherId);
         }
-        return new DefinitionIdentityIndex(idsByFoldedValue);
+        return new DefinitionIdentityIndex(idsByFoldedValue, ambiguousFoldedIds, preservedIdsByFoldedValue);
+    }
+
+    /**
+     * Scans every {@code testcase.yaml} under the Package root with the same bounds as RUN identity checks.
+     * When {@code bestEffort} is true, per-file identity failures are recorded and scanning continues;
+     * package-wide hard limits still abort the scan.
+     */
+    public IdentityCatalogResult buildPackageIdentityCatalog(Path packageRoot, Options options,
+            boolean bestEffort) throws Exception {
+        Options effective = options == null ? Options.defaults() : options;
+        PackageResourceResolver resources = new PackageResourceResolver(packageRoot);
+        Path root = resources.packageRoot();
+        Map<String,String> idsByFoldedValue = new LinkedHashMap<String,String>();
+        Map<String,String> preservedIdsByFoldedValue = new LinkedHashMap<String,String>();
+        Set<String> ambiguousFoldedIds = new LinkedHashSet<String>();
+        Set<String> failedLogicalNames = new LinkedHashSet<String>();
+        List<DiagnosticException> diagnostics = new ArrayList<DiagnosticException>();
+        int entries = 0;
+        int definitions = 0;
+        long definitionBytes = 0L;
+        identityCatalogScans++;
+        try (Stream<Path> paths = Files.walk(root)) {
+            java.util.Iterator<Path> iterator = paths.iterator();
+            while (iterator.hasNext()) {
+                checkCancelled(effective);
+                Path path = iterator.next();
+                if (++entries > MAX_PACKAGE_IDENTITY_ENTRIES)
+                    throw invalid("package", "id", "Package Test Case identity scan exceeds its entry limit");
+                if (!"testcase.yaml".equals(path.getFileName().toString())) continue;
+                if (path.toAbsolutePath().normalize().equals(root.toAbsolutePath().normalize())) continue;
+                if (Files.isSymbolicLink(path) || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                    DiagnosticException failure = invalid("package", "id",
+                            "Package testcase.yaml resources must be regular non-symlink files");
+                    if (!bestEffort) throw failure;
+                    diagnostics.add(failure);
+                    continue;
+                }
+                PackageResourceResolver.PackageResource resource;
+                try { resource = resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE); }
+                catch (Exception failure) {
+                    DiagnosticException typed = invalid("package", "id",
+                            "A Package testcase.yaml resource is outside the Package");
+                    if (!bestEffort) throw typed;
+                    diagnostics.add(typed);
+                    continue;
+                }
+                if (++definitions > MAX_PACKAGE_TEST_CASE_DEFINITIONS)
+                    throw invalid(resource.logicalName(), "id",
+                            "Package has too many native Test Case Definitions to validate identities");
+                long sourceSize = Files.size(resource.canonicalPath());
+                if (sourceSize > MAX_SOURCE_BYTES) {
+                    DiagnosticException failure = invalid(resource.logicalName(), "definition",
+                            "Package Test Case Definition source exceeds its size limit");
+                    if (!bestEffort) throw failure;
+                    diagnostics.add(failure);
+                    failedLogicalNames.add(resource.logicalName());
+                    continue;
+                }
+                definitionBytes += sourceSize;
+                if (definitionBytes > MAX_PACKAGE_IDENTITY_BYTES)
+                    throw invalid(resource.logicalName(), "id",
+                            "Package Test Case identity scan exceeds its source-size limit");
+                String otherId;
+                try {
+                    otherId = readDefinitionId(resource.canonicalPath(), resource.logicalName(), effective);
+                    validateDefinitionId(otherId, resource.logicalName());
+                } catch (DiagnosticException failure) {
+                    if (!bestEffort) throw failure;
+                    diagnostics.add(failure);
+                    failedLogicalNames.add(resource.logicalName());
+                    continue;
+                } catch (RuntimeException failure) {
+                    DiagnosticException typed = invalid(resource.logicalName(), "id",
+                            safeMessage(failure, "Package Test Case Definition ID is unavailable"));
+                    if (!bestEffort) throw typed;
+                    diagnostics.add(typed);
+                    failedLogicalNames.add(resource.logicalName());
+                    continue;
+                }
+                String folded = asciiFold(otherId);
+                String previous = idsByFoldedValue.put(folded, resource.logicalName());
+                if (previous != null) {
+                    idsByFoldedValue.put(folded, previous);
+                    ambiguousFoldedIds.add(folded);
+                    if (!bestEffort) {
+                        throw DiagnosticException.of(DiagnosticCodes.TESTCASE_INVALID,
+                                "Package Test Case Definition IDs are ambiguous",
+                                "Definition ID '" + otherId + "' collides under ASCII case folding between '"
+                                        + previous + "' and '" + resource.logicalName() + "'.",
+                                "Assign each testcase.yaml a unique case-preserving ID within this Package.")
+                                .withLocation(resource.logicalName(), "id", null, null, null, null, null);
+                    }
+                    // Best-effort keeps ambiguity for assertUnique when each Definition resolves.
+                } else {
+                    preservedIdsByFoldedValue.put(folded, otherId);
+                }
+            }
+        }
+        return new IdentityCatalogResult(
+                new DefinitionIdentityIndex(idsByFoldedValue, ambiguousFoldedIds, preservedIdsByFoldedValue),
+                diagnostics, failedLogicalNames);
     }
 
     /** Resolves an existing package-relative Definition after proving its path remains package-local. */
@@ -404,56 +525,16 @@ public final class TestCaseDefinitionResolver {
         return records;
     }
 
-    /** Ensures the Definition identity is unique across the Package's native testcase.yaml resources. */
+    /** Ensures the Definition identity is unique across every Package-local {@code testcase.yaml}. */
     private void validatePackageDefinitionIdentity(String currentId, String currentSourceReference,
             Path packageRoot, PackageResourceResolver resources, Options options) throws Exception {
         if (options.identityIndex() != null) {
             options.identityIndex().assertUnique(currentId, currentSourceReference);
             return;
         }
-        Map<String,String> idsByFoldedValue = new LinkedHashMap<String,String>();
-        idsByFoldedValue.put(asciiFold(currentId), currentSourceReference);
-        int entries = 0;
-        int definitions = 0;
-        long definitionBytes = 0L;
-        identityCatalogScans++;
-        try (Stream<Path> paths = Files.walk(packageRoot)) {
-            java.util.Iterator<Path> iterator = paths.iterator();
-            while (iterator.hasNext()) {
-                checkCancelled(options);
-                Path path = iterator.next();
-                if (++entries > MAX_PACKAGE_IDENTITY_ENTRIES)
-                    throw invalid(currentSourceReference, "id", "Package Test Case identity scan exceeds its entry limit");
-                if (!"testcase.yaml".equals(path.getFileName().toString())) continue;
-                if (path.toAbsolutePath().normalize().equals(packageRoot.toAbsolutePath().normalize())) continue;
-                if (Files.isSymbolicLink(path) || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
-                    throw invalid(currentSourceReference, "id", "Package testcase.yaml resources must be regular non-symlink files");
-                PackageResourceResolver.PackageResource resource;
-                try { resource = resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE); }
-                catch (Exception failure) { throw invalid(currentSourceReference, "id", "A Package testcase.yaml resource is outside the Package"); }
-                if (currentSourceReference.equals(resource.logicalName())) continue;
-                if (++definitions > MAX_PACKAGE_TEST_CASE_DEFINITIONS)
-                    throw invalid(currentSourceReference, "id", "Package has too many native Test Case Definitions to validate identities");
-                long sourceSize = Files.size(resource.canonicalPath());
-                if (sourceSize > MAX_SOURCE_BYTES)
-                    throw invalid(resource.logicalName(), "definition", "Package Test Case Definition source exceeds its size limit");
-                definitionBytes += sourceSize;
-                if (definitionBytes > MAX_PACKAGE_IDENTITY_BYTES)
-                    throw invalid(currentSourceReference, "id", "Package Test Case identity scan exceeds its source-size limit");
-                String otherId = readDefinitionId(resource.canonicalPath(), resource.logicalName(), options);
-                validateDefinitionId(otherId, resource.logicalName());
-                String folded = asciiFold(otherId);
-                String previous = idsByFoldedValue.put(folded, resource.logicalName());
-                if (previous != null) {
-                    throw DiagnosticException.of(DiagnosticCodes.TESTCASE_INVALID,
-                            "Package Test Case Definition IDs are ambiguous",
-                            "Definition ID '" + otherId + "' collides under ASCII case folding between '"
-                                    + previous + "' and '" + resource.logicalName() + "'.",
-                            "Assign each testcase.yaml a unique case-preserving ID within this Package.")
-                            .withLocation(resource.logicalName(), "id", null, null, null, null, null);
-                }
-            }
-        }
+        // Same Package-wide discovery scope and bounds as preparePackageValidationOptions / RUN.
+        IdentityCatalogResult catalog = buildPackageIdentityCatalog(packageRoot, options, false);
+        catalog.index().assertUnique(currentId, currentSourceReference);
     }
 
     private String readDefinitionId(Path file, String logicalName, Options options) throws Exception {
@@ -957,23 +1038,84 @@ public final class TestCaseDefinitionResolver {
         }
     }
 
+    /** Shared Options plus identity diagnostics collected during best-effort Package validation prep. */
+    public static final class PackageValidationCaches {
+        private final Options options;
+        private final List<DiagnosticException> identityDiagnostics;
+        private final Set<String> failedLogicalNames;
+
+        PackageValidationCaches(Options options, IdentityCatalogResult catalog) {
+            this.options = options;
+            this.identityDiagnostics = catalog.diagnostics();
+            this.failedLogicalNames = catalog.failedLogicalNames();
+        }
+
+        public Options options() { return options; }
+        public List<DiagnosticException> identityDiagnostics() { return identityDiagnostics; }
+        public Set<String> failedLogicalNames() { return failedLogicalNames; }
+    }
+
+    /** Result of a Package-wide Definition identity scan. */
+    public static final class IdentityCatalogResult {
+        private final DefinitionIdentityIndex index;
+        private final List<DiagnosticException> diagnostics;
+        private final Set<String> failedLogicalNames;
+
+        IdentityCatalogResult(DefinitionIdentityIndex index, List<DiagnosticException> diagnostics,
+                Set<String> failedLogicalNames) {
+            this.index = index;
+            this.diagnostics = Collections.unmodifiableList(
+                    new ArrayList<DiagnosticException>(diagnostics == null
+                            ? Collections.<DiagnosticException>emptyList() : diagnostics));
+            this.failedLogicalNames = Collections.unmodifiableSet(new LinkedHashSet<String>(
+                    failedLogicalNames == null ? Collections.<String>emptySet() : failedLogicalNames));
+        }
+
+        public DefinitionIdentityIndex index() { return index; }
+        public List<DiagnosticException> diagnostics() { return diagnostics; }
+        public Set<String> failedLogicalNames() { return failedLogicalNames; }
+    }
+
     /** Case-folded Package Definition identity catalog reused across whole-Package Native validation. */
     public static final class DefinitionIdentityIndex {
         private final Map<String,String> idsByFoldedValue;
+        private final Set<String> ambiguousFoldedIds;
+        private final Map<String,String> preservedIdsByFoldedValue;
 
         DefinitionIdentityIndex(Map<String,String> idsByFoldedValue) {
+            this(idsByFoldedValue, Collections.<String>emptySet(), Collections.<String,String>emptyMap());
+        }
+
+        DefinitionIdentityIndex(Map<String,String> idsByFoldedValue, Set<String> ambiguousFoldedIds,
+                Map<String,String> preservedIdsByFoldedValue) {
             this.idsByFoldedValue = Collections.unmodifiableMap(new LinkedHashMap<String,String>(idsByFoldedValue));
+            this.ambiguousFoldedIds = Collections.unmodifiableSet(new LinkedHashSet<String>(
+                    ambiguousFoldedIds == null ? Collections.<String>emptySet() : ambiguousFoldedIds));
+            this.preservedIdsByFoldedValue = Collections.unmodifiableMap(new LinkedHashMap<String,String>(
+                    preservedIdsByFoldedValue == null ? Collections.<String,String>emptyMap()
+                            : preservedIdsByFoldedValue));
         }
 
         void assertUnique(String currentId, String currentSourceReference) {
             validateDefinitionId(currentId, currentSourceReference);
             String folded = asciiFold(currentId);
             String owner = idsByFoldedValue.get(folded);
+            String preservedOwnerId = preservedIdsByFoldedValue.get(folded);
+            String reportedId = preservedOwnerId == null ? currentId : preservedOwnerId;
+            if (ambiguousFoldedIds.contains(folded)) {
+                String other = owner == null || owner.equals(currentSourceReference) ? "another testcase.yaml" : owner;
+                throw DiagnosticException.of(DiagnosticCodes.TESTCASE_INVALID,
+                        "Package Test Case Definition IDs are ambiguous",
+                        "Definition ID '" + reportedId + "' collides under ASCII case folding between '"
+                                + other + "' and '" + currentSourceReference + "'.",
+                        "Assign each testcase.yaml a unique case-preserving ID within this Package.")
+                        .withLocation(currentSourceReference, "id", null, null, null, null, null);
+            }
             if (owner == null) return;
             if (!owner.equals(currentSourceReference)) {
                 throw DiagnosticException.of(DiagnosticCodes.TESTCASE_INVALID,
                         "Package Test Case Definition IDs are ambiguous",
-                        "Definition ID '" + currentId + "' collides under ASCII case folding between '"
+                        "Definition ID '" + reportedId + "' collides under ASCII case folding between '"
                                 + owner + "' and '" + currentSourceReference + "'.",
                         "Assign each testcase.yaml a unique case-preserving ID within this Package.")
                         .withLocation(currentSourceReference, "id", null, null, null, null, null);
