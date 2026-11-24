@@ -57,9 +57,10 @@ public final class TestCaseDefinitionResolver {
     private static final Pattern DEFINITION_ID = Pattern.compile("^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$");
 
     private final Path schemaFile;
-    /** Package-visible counter for tests that prove catalog scans are not repeated per Definition. */
+    /** Package-visible counters for tests that prove Package caches are built once. */
     int identityCatalogScans;
     int flowTreePreflightScans;
+    int flowRegistryBuilds;
 
     public TestCaseDefinitionResolver(Path activeSchemaFile) {
         if (activeSchemaFile == null) throw new IllegalArgumentException("The active Test Case schema file is required");
@@ -79,13 +80,17 @@ public final class TestCaseDefinitionResolver {
             Path templatesRoot, Options base) throws Exception {
         Options options = base == null ? Options.defaults() : base;
         IdentityCatalogResult catalog = buildPackageIdentityCatalog(packageRoot, options, true);
+        if (catalog.hardLimitReached()) return new PackageValidationCaches(options, catalog);
         PackageResourceResolver resources = new PackageResourceResolver(packageRoot);
         att.flow.PackageFlowRoots.Resolution resolution = att.flow.PackageFlowRoots.resolve(
                 resources.packageRoot(), flowRoot == null ? att.flow.PackageFlowRoots.DEFAULT_FLOW_ROOT : flowRoot,
                 templatesRoot);
         flowTreePreflightScans++;
         FlowTreeSnapshot flowTree = preflightFlowTrees(resolution.existingRoots(), resources, "package", options);
-        return new PackageValidationCaches(options.withPackageCaches(catalog.index(), flowTree), catalog);
+        flowRegistryBuilds++;
+        FlowRegistry registry = new FlowRegistry(resources.packageRoot(), resolution, false,
+                flowTree.sources, flowTree.templateDescriptors);
+        return new PackageValidationCaches(options.withPackageCaches(catalog.index(), flowTree, registry), catalog);
     }
 
     /**
@@ -169,8 +174,15 @@ public final class TestCaseDefinitionResolver {
             while (iterator.hasNext()) {
                 checkCancelled(effective);
                 Path path = iterator.next();
-                if (++entries > MAX_PACKAGE_IDENTITY_ENTRIES)
-                    throw invalid("package", "id", "Package Test Case identity scan exceeds its entry limit");
+                if (++entries > MAX_PACKAGE_IDENTITY_ENTRIES) {
+                    DiagnosticException failure = invalid("package", "id",
+                            "Package Test Case identity scan exceeds its entry limit");
+                    if (!bestEffort) throw failure;
+                    diagnostics.add(failure);
+                    return new IdentityCatalogResult(
+                            new DefinitionIdentityIndex(idsByFoldedValue, ambiguousFoldedIds, preservedIdsByFoldedValue),
+                            diagnostics, failedLogicalNames, true);
+                }
                 if (!"testcase.yaml".equals(path.getFileName().toString())) continue;
                 if (path.toAbsolutePath().normalize().equals(root.toAbsolutePath().normalize())) continue;
                 if (Files.isSymbolicLink(path) || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
@@ -189,9 +201,16 @@ public final class TestCaseDefinitionResolver {
                     diagnostics.add(typed);
                     continue;
                 }
-                if (++definitions > MAX_PACKAGE_TEST_CASE_DEFINITIONS)
-                    throw invalid(resource.logicalName(), "id",
+                if (++definitions > MAX_PACKAGE_TEST_CASE_DEFINITIONS) {
+                    DiagnosticException failure = invalid(resource.logicalName(), "id",
                             "Package has too many native Test Case Definitions to validate identities");
+                    if (!bestEffort) throw failure;
+                    diagnostics.add(failure);
+                    failedLogicalNames.add(resource.logicalName());
+                    return new IdentityCatalogResult(
+                            new DefinitionIdentityIndex(idsByFoldedValue, ambiguousFoldedIds, preservedIdsByFoldedValue),
+                            diagnostics, failedLogicalNames, true);
+                }
                 long sourceSize = Files.size(resource.canonicalPath());
                 if (sourceSize > MAX_SOURCE_BYTES) {
                     DiagnosticException failure = invalid(resource.logicalName(), "definition",
@@ -202,9 +221,16 @@ public final class TestCaseDefinitionResolver {
                     continue;
                 }
                 definitionBytes += sourceSize;
-                if (definitionBytes > MAX_PACKAGE_IDENTITY_BYTES)
-                    throw invalid(resource.logicalName(), "id",
+                if (definitionBytes > MAX_PACKAGE_IDENTITY_BYTES) {
+                    DiagnosticException failure = invalid(resource.logicalName(), "id",
                             "Package Test Case identity scan exceeds its source-size limit");
+                    if (!bestEffort) throw failure;
+                    diagnostics.add(failure);
+                    failedLogicalNames.add(resource.logicalName());
+                    return new IdentityCatalogResult(
+                            new DefinitionIdentityIndex(idsByFoldedValue, ambiguousFoldedIds, preservedIdsByFoldedValue),
+                            diagnostics, failedLogicalNames, true);
+                }
                 String otherId;
                 try {
                     otherId = readDefinitionId(resource.canonicalPath(), resource.logicalName(), effective);
@@ -243,7 +269,7 @@ public final class TestCaseDefinitionResolver {
         }
         return new IdentityCatalogResult(
                 new DefinitionIdentityIndex(idsByFoldedValue, ambiguousFoldedIds, preservedIdsByFoldedValue),
-                diagnostics, failedLogicalNames);
+                diagnostics, failedLogicalNames, false);
     }
 
     /** Resolves an existing package-relative Definition after proving its path remains package-local. */
@@ -602,10 +628,13 @@ public final class TestCaseDefinitionResolver {
             Options options) throws Exception {
         checkCancelled(options);
         PackageResourceResolver resources = new PackageResourceResolver(packageRoot);
-        FlowRegistry registry;
-        try { registry = new FlowRegistry(packageRoot, flowRoots, false,
-                flowSnapshots.sources, flowSnapshots.templateDescriptors); }
-        catch (Exception failure) { throw flowFailure(sourceReference, packageRoot, failure, "Package Flow registry is invalid"); }
+        FlowRegistry registry = options.flowRegistry();
+        if (registry == null) {
+            flowRegistryBuilds++;
+            try { registry = new FlowRegistry(packageRoot, flowRoots, false,
+                    flowSnapshots.sources, flowSnapshots.templateDescriptors); }
+            catch (Exception failure) { throw flowFailure(sourceReference, packageRoot, failure, "Package Flow registry is invalid"); }
+        }
         checkCancelled(options);
         if (!FlowRegistry.isCanonicalId(flowId)) throw invalid(sourceReference, "flow", "Flow ID must be static and canonical");
         FlowDefinition selected;
@@ -986,6 +1015,7 @@ public final class TestCaseDefinitionResolver {
         private final BooleanSupplier cancellation;
         private final DefinitionIdentityIndex identityIndex;
         private final FlowTreeSnapshot flowTreeSnapshot;
+        private final FlowRegistry flowRegistry;
 
         public Options() { this(MAX_RECORDS, 100, null, new BooleanSupplier() {
             @Override public boolean getAsBoolean() { return false; }
@@ -993,12 +1023,12 @@ public final class TestCaseDefinitionResolver {
 
         public Options(int maxRecords, int previewLimit, Set<String> selectedQualifiedCaseIds,
                        BooleanSupplier cancellation) {
-            this(maxRecords, previewLimit, selectedQualifiedCaseIds, cancellation, null, null);
+            this(maxRecords, previewLimit, selectedQualifiedCaseIds, cancellation, null, null, null);
         }
 
         private Options(int maxRecords, int previewLimit, Set<String> selectedQualifiedCaseIds,
                         BooleanSupplier cancellation, DefinitionIdentityIndex identityIndex,
-                        FlowTreeSnapshot flowTreeSnapshot) {
+                        FlowTreeSnapshot flowTreeSnapshot, FlowRegistry flowRegistry) {
             if (maxRecords < 1 || maxRecords > MAX_RECORDS) throw new IllegalArgumentException("maxRecords must be between 1 and " + MAX_RECORDS);
             if (previewLimit < 0 || previewLimit > MAX_PREVIEW_CASES) throw new IllegalArgumentException("previewLimit must be between 0 and " + MAX_PREVIEW_CASES);
             this.maxRecords = maxRecords;
@@ -1022,6 +1052,7 @@ public final class TestCaseDefinitionResolver {
             } : cancellation;
             this.identityIndex = identityIndex;
             this.flowTreeSnapshot = flowTreeSnapshot;
+            this.flowRegistry = flowRegistry;
         }
 
         public static Options defaults() { return new Options(); }
@@ -1031,10 +1062,12 @@ public final class TestCaseDefinitionResolver {
         public BooleanSupplier cancellation() { return cancellation; }
         DefinitionIdentityIndex identityIndex() { return identityIndex; }
         FlowTreeSnapshot flowTreeSnapshot() { return flowTreeSnapshot; }
+        FlowRegistry flowRegistry() { return flowRegistry; }
 
-        Options withPackageCaches(DefinitionIdentityIndex identityIndex, FlowTreeSnapshot flowTreeSnapshot) {
+        Options withPackageCaches(DefinitionIdentityIndex identityIndex, FlowTreeSnapshot flowTreeSnapshot,
+                FlowRegistry flowRegistry) {
             return new Options(maxRecords, previewLimit, selectedQualifiedCaseIds, cancellation,
-                    identityIndex, flowTreeSnapshot);
+                    identityIndex, flowTreeSnapshot, flowRegistry);
         }
     }
 
@@ -1043,16 +1076,20 @@ public final class TestCaseDefinitionResolver {
         private final Options options;
         private final List<DiagnosticException> identityDiagnostics;
         private final Set<String> failedLogicalNames;
+        private final boolean hardLimitReached;
 
         PackageValidationCaches(Options options, IdentityCatalogResult catalog) {
             this.options = options;
             this.identityDiagnostics = catalog.diagnostics();
             this.failedLogicalNames = catalog.failedLogicalNames();
+            this.hardLimitReached = catalog.hardLimitReached();
         }
 
         public Options options() { return options; }
         public List<DiagnosticException> identityDiagnostics() { return identityDiagnostics; }
         public Set<String> failedLogicalNames() { return failedLogicalNames; }
+        /** True when a Package-wide identity bound failed; callers must not rescan per Definition. */
+        public boolean hardLimitReached() { return hardLimitReached; }
     }
 
     /** Result of a Package-wide Definition identity scan. */
@@ -1060,20 +1097,23 @@ public final class TestCaseDefinitionResolver {
         private final DefinitionIdentityIndex index;
         private final List<DiagnosticException> diagnostics;
         private final Set<String> failedLogicalNames;
+        private final boolean hardLimitReached;
 
         IdentityCatalogResult(DefinitionIdentityIndex index, List<DiagnosticException> diagnostics,
-                Set<String> failedLogicalNames) {
+                Set<String> failedLogicalNames, boolean hardLimitReached) {
             this.index = index;
             this.diagnostics = Collections.unmodifiableList(
                     new ArrayList<DiagnosticException>(diagnostics == null
                             ? Collections.<DiagnosticException>emptyList() : diagnostics));
             this.failedLogicalNames = Collections.unmodifiableSet(new LinkedHashSet<String>(
                     failedLogicalNames == null ? Collections.<String>emptySet() : failedLogicalNames));
+            this.hardLimitReached = hardLimitReached;
         }
 
         public DefinitionIdentityIndex index() { return index; }
         public List<DiagnosticException> diagnostics() { return diagnostics; }
         public Set<String> failedLogicalNames() { return failedLogicalNames; }
+        public boolean hardLimitReached() { return hardLimitReached; }
     }
 
     /** Case-folded Package Definition identity catalog reused across whole-Package Native validation. */

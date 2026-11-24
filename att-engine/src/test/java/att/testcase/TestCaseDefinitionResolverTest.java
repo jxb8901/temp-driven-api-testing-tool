@@ -943,8 +943,10 @@ class TestCaseDefinitionResolverTest {
                 packageRoot, Paths.get("flows"), Paths.get("templates"),
                 TestCaseDefinitionResolver.Options.defaults());
         assertTrue(caches.identityDiagnostics().isEmpty(), caches.identityDiagnostics().toString());
+        assertFalse(caches.hardLimitReached());
         assertEquals(1, resolver.identityCatalogScans);
         assertEquals(1, resolver.flowTreePreflightScans);
+        assertEquals(1, resolver.flowRegistryBuilds);
         for (Path definition : definitions) {
             TestCaseResolutionResult result = resolver.resolve(definition, "package", packageRoot,
                     Paths.get("flows"), Paths.get("templates"), caches.options());
@@ -952,6 +954,32 @@ class TestCaseDefinitionResolverTest {
         }
         assertEquals(1, resolver.identityCatalogScans, "Identity catalog must not be rescanned per Definition");
         assertEquals(1, resolver.flowTreePreflightScans, "Flow tree must not be preflighted per Definition");
+        assertEquals(1, resolver.flowRegistryBuilds, "FlowRegistry must be indexed once across Definitions");
+    }
+
+    @Test void packageIdentityHardLimitIsTerminalWithoutPerDefinitionRescan() throws Exception {
+        Files.createDirectories(packageRoot.resolve("flows/demo"));
+        Files.write(packageRoot.resolve("flows/demo/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: demo.v1\nname: Demo\ndescription: Shared.\n"
+                        + "actions:\n  note:\n    type: log\n    message: ok\n")
+                        .getBytes(StandardCharsets.UTF_8));
+        int overLimit = TestCaseDefinitionResolver.MAX_PACKAGE_TEST_CASE_DEFINITIONS + 1;
+        for (int index = 1; index <= overLimit; index++) {
+            Path directory = Files.createDirectories(packageRoot.resolve("testcase/d" + index));
+            Files.write(directory.resolve("testcase.yaml"),
+                    ("schemaVersion: att-testcase/v1\nid: demo.d" + index + "\nflow: demo.v1\ninputs: {}\n")
+                            .getBytes(StandardCharsets.UTF_8));
+        }
+        TestCaseDefinitionResolver.PackageValidationCaches caches = resolver.preparePackageValidationOptions(
+                packageRoot, Paths.get("flows"), Paths.get("templates"),
+                TestCaseDefinitionResolver.Options.defaults());
+        assertTrue(caches.hardLimitReached());
+        assertEquals(1, caches.identityDiagnostics().size(), caches.identityDiagnostics().toString());
+        assertTrue(String.valueOf(caches.identityDiagnostics().get(0).detail()).contains("too many"),
+                String.valueOf(caches.identityDiagnostics().get(0).detail()));
+        assertEquals(1, resolver.identityCatalogScans);
+        assertEquals(0, resolver.flowTreePreflightScans);
+        assertEquals(0, resolver.flowRegistryBuilds);
     }
 
     @Test void packageIdentityCatalogIncludesDefinitionsOutsideTestcaseRoot() throws Exception {

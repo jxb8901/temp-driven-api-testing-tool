@@ -1721,6 +1721,42 @@ class PackageValidatorTest {
                 summary.diagnostics.toString());
     }
 
+    @Test void packageValidationStopsAfterIdentityHardLimitWithoutRescanning() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("native-hard-limit"));
+        att.TestSchemas.install(root);
+        Files.createDirectories(root.resolve("config"));
+        Files.createDirectories(root.resolve("flows/demo"));
+        Files.write(root.resolve("package.yaml"),
+                ("schemaVersion: att-package/v2\nresources:\n  flowRoot: flows\n  testcaseRoot: testcase\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(root.resolve("config/config.yaml"),
+                ("schemaVersion: att-config/v2.15\nenvironment: SIT\n"
+                        + "templates: {root: templates}\ntestcase: {root: testcase}\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(root.resolve("flows/demo/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: demo.v1\nname: Demo\ndescription: Valid Flow.\n"
+                        + "actions:\n  note:\n    type: log\n    message: ok\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        int overLimit = att.testcase.TestCaseDefinitionResolver.MAX_PACKAGE_TEST_CASE_DEFINITIONS + 1;
+        for (int index = 1; index <= overLimit; index++) {
+            Path directory = Files.createDirectories(root.resolve("testcase/d" + index));
+            Files.write(directory.resolve("testcase.yaml"),
+                    ("schemaVersion: att-testcase/v1\nid: demo.d" + index + "\nflow: demo.v1\ninputs: {}\n")
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root, root, "SIT");
+        PackageValidator.ValidationSummary summary = new PackageValidator(root, loaded, root.resolve("config/config.yaml"))
+                .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
+        assertFalse(summary.valid(), summary.diagnostics.toString());
+        assertEquals(0, summary.cases);
+        long identityErrors = summary.diagnostics.stream()
+                .filter(item -> item.severity() == Diagnostic.Severity.ERROR
+                        && item.message() != null
+                        && item.message().toLowerCase(java.util.Locale.ROOT).contains("too many"))
+                .count();
+        assertEquals(1L, identityErrors, summary.diagnostics.toString());
+    }
+
     @Test void packageValidationReportsIndependentDefinitionFailures() throws Exception {
         Path root = Files.createDirectories(tempDir.resolve("native-multi-failure"));
         att.TestSchemas.install(root);

@@ -2757,22 +2757,20 @@ public final class PackageValidator {
             return 0;
         }
         att.testcase.TestCaseDefinitionResolver resolver = new att.testcase.TestCaseDefinitionResolver(schema);
-        att.testcase.TestCaseDefinitionResolver.Options sharedOptions =
-                att.testcase.TestCaseDefinitionResolver.Options.defaults();
-        java.util.Set<String> identityFailedLogicalNames = java.util.Collections.emptySet();
+        att.testcase.TestCaseDefinitionResolver.PackageValidationCaches caches;
         try {
-            att.testcase.TestCaseDefinitionResolver.PackageValidationCaches caches =
-                    resolver.preparePackageValidationOptions(projectRoot, global.flowRoot(),
-                            global.templatesRoot(), att.testcase.TestCaseDefinitionResolver.Options.defaults());
-            sharedOptions = caches.options();
-            identityFailedLogicalNames = caches.failedLogicalNames();
-            for (att.validation.DiagnosticException identityError : caches.identityDiagnostics())
-                diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, identityError, directory));
+            caches = resolver.preparePackageValidationOptions(projectRoot, global.flowRoot(),
+                    global.templatesRoot(), att.testcase.TestCaseDefinitionResolver.Options.defaults());
         } catch (Exception error) {
-            // Hard package-wide identity bounds failed; fall back to isolated per-Definition resolution.
             diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, error, directory));
-            sharedOptions = att.testcase.TestCaseDefinitionResolver.Options.defaults();
+            return 0;
         }
+        for (att.validation.DiagnosticException identityError : caches.identityDiagnostics())
+            diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, identityError, directory));
+        // Package-wide hard identity bounds are terminal: one diagnostic, no per-Definition rescan.
+        if (caches.hardLimitReached()) return 0;
+        att.testcase.TestCaseDefinitionResolver.Options sharedOptions = caches.options();
+        java.util.Set<String> identityFailedLogicalNames = caches.failedLogicalNames();
         int resolvedCases = 0;
         att.resource.PackageResourceResolver resources = new att.resource.PackageResourceResolver(projectRoot);
         for (Path definition : definitions) {
