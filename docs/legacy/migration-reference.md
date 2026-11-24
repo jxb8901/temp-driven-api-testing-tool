@@ -2,14 +2,14 @@
 
 ## Independent Load evidence quotas
 
-Use `att-load/v1.7` for finite Load evidence quotas. Legacy scenarios with `maxSamples`, or with the shared `maxSuccessSamples` / `maxFailureSamples` pair, keep their existing semantics. Per-workload caps require the explicit `evidence.quotaScope: perWorkload` discriminator. In that mode configure `evidence.defaults` and optional cap-only `workloads[].evidence` overrides; do not add root `maxSamples`, `maxSuccessSamples` or `maxFailureSamples`. Each workload's caps are independent and no capacity is lent, borrowed, reclaimed or used to delete retained artifacts. See [Load](../execution-modes/load.md#independent-evidence-quotas) for limits, validation and reporting.
+Use `att-load/v1.7` for finite Load evidence quotas. Legacy scenarios with `maxSamples`, or with the shared `maxSuccessSamples` / `maxFailureSamples` pair, keep their existing semantics. Per-workload caps require the explicit `evidence.quotaScope: perWorkload` discriminator. In that mode configure `evidence.defaults` and optional cap-only `workloads[].evidence` overrides; do not add root `maxSamples`, `maxSuccessSamples` or `maxFailureSamples`. Each workload's caps are independent and no capacity is lent, borrowed, reclaimed or used to delete retained artifacts. See [Load](../reference/execution-modes/load.md#independent-evidence-quotas) for limits, validation and reporting.
 
 
 ## MQ request queue routing
 
 Optional pool lifecycle keys (`maxIdle`, `maxLifetime`, `staleIdleValidation`, `staleIdleThreshold`, `validationTimeout`, `heartbeatInterval`) require `att-mqhelper/v1.3`. A v1.2 descriptor that adds them fails schema validation. Omitting them preserves the previous borrow path: no idle validation, no max-idle or max-lifetime recycling, and no client heartbeat property.
 
-`att-mqhelper/v1.2` scalar descriptors remain supported. To use `message.requestQueues` or `requestQueueSelection`, change the descriptor to `att-mqhelper/v1.3` and replace the scalar `requestQueue` with a 1–256-item unique queue list. Keep one optional scalar `replyQueue`. Instance routing overrides replace inherited scalar/list keys and reset the queue strategy unless explicitly configured. See [MQHelper](../resources/mqhelper.md#request-queue-routing) for queue selection, counter scope, evidence and replay behavior.
+`att-mqhelper/v1.2` scalar descriptors remain supported. To use `message.requestQueues` or `requestQueueSelection`, change the descriptor to `att-mqhelper/v1.3` and replace the scalar `requestQueue` with a 1–256-item unique queue list. Keep one optional scalar `replyQueue`. Instance routing overrides replace inherited scalar/list keys and reset the queue strategy unless explicitly configured. See [MQHelper](../reference/resources/mqhelper.md#request-queue-routing) for queue selection, counter scope, evidence and replay behavior.
 
 
 ## File arguments and case-log paths
@@ -73,12 +73,12 @@ For Load, migrate old single-target or v1.1 scenarios through the historical v1.
 
 The historical `att-load-profile/v1.0` policy file is migration-only: rewrite it as the current policy-only `att-load/v1.6` descriptor before use. It is not a current `load/load.yaml` example.
 
-Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](../actions.md), [Runtime and Context Model](../runtime-context.md), [Load Mode](../execution-modes/load.md) and [Schema Matrix](schema-matrix.md).
+Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](../reference/actions.md), [Runtime and Context Model](../reference/runtime-context.md), [Load Mode](../reference/execution-modes/load.md) and [Schema Matrix](schema-matrix.md).
 
 <!-- att-docs:historical -->
 ## Historical centralized SUT Metrics catalog
 
-Before the Package-local SUT Metrics migration, global config `att-config/v2.14` could own bounded `sutMetrics.dataSources`, `metricSources`, `groups`, and `profiles` arrays; `att-config/v2.13` files remained compatible when they did not declare `sutMetrics`. The migrated configuration uses global `att-config/v2.15` for Data Source descriptor paths, while each Package owns its Metric Sources, Groups, and Profiles. Upgrade using the [Package-local SUT Metrics migration guide](../../guides/sut-metrics-config-migration.md). The old `data/sut-metrics-catalog.json` is not an active source for Package definitions and has no automatic dry-run/apply migration command; reconcile its entries with their owners before retiring it.
+Before the Package-local SUT Metrics migration, global config `att-config/v2.14` could own bounded `sutMetrics.dataSources`, `metricSources`, `groups`, and `profiles` arrays; `att-config/v2.13` files remained compatible when they did not declare `sutMetrics`. The migrated configuration uses global `att-config/v2.15` for Data Source descriptor paths, while each Package owns its Metric Sources, Groups, and Profiles. Upgrade using the [Package-local SUT Metrics migration guide](../guides/sut-metrics-config-migration.md). The old `data/sut-metrics-catalog.json` is not an active source for Package definitions and has no automatic dry-run/apply migration command; reconcile its entries with their owners before retiring it.
 <!-- /att-docs:historical -->
 
 
@@ -103,19 +103,19 @@ File-content paths are relative to the canonical package root. `./` and `../` ar
 
 Unsupported schema versions fail validation before execution with migration guidance. ATT does not silently convert old fields or run Tools/resources while producing that guidance.
 
-See [Runtime and Context Model](../runtime-context.md) for META lifecycle and [Load Mode](../execution-modes/load.md) for execution identity and retained evidence paths.
+See [Runtime and Context Model](../reference/runtime-context.md) for META lifecycle and [Load Mode](../reference/execution-modes/load.md) for execution identity and retained evidence paths.
 
 ## Debug schema migration
 
-`att-debug/v1.0` and `att-debug/v1.1` are historical; upgrade to `att-debug/v1.2`. Template/Flow may define `vars` to seed `EXEC.VARS`; Tool targets do not support `vars`. The current schema also permits package-relative `testdata` imports scoped to a standalone Debug invocation. See [Debug](../execution-modes/debug.md) for current input and argument rules.
+`att-debug/v1.0` and `att-debug/v1.1` are historical; upgrade to `att-debug/v1.2`. Template/Flow may define `vars` to seed `EXEC.VARS`; Tool targets do not support `vars`. The current schema also permits package-relative `testdata` imports scoped to a standalone Debug invocation. See [Debug](../reference/execution-modes/debug.md) for current input and argument rules.
 
 ## Global configuration migration
 
-Old `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` fields are not part of the active global contract. See [Configuration](../configuration.md) for current fields.
+Old `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` fields are not part of the active global contract. See [Configuration](../reference/configuration.md) for current fields.
 
 ## Environment profile migration
 
-When migrating complete-config packages, preserve descriptors and Actions, move common settings to `config/config.yaml`, move descriptor lists to `environments.<NAME>`, and select with `--config config/config.yaml --env <NAME>`. See [Configuration](../configuration.md) for the current contract.
+When migrating complete-config packages, preserve descriptors and Actions, move common settings to `config/config.yaml`, move descriptor lists to `environments.<NAME>`, and select with `--config config/config.yaml --env <NAME>`. See [Configuration](../reference/configuration.md) for the current contract.
 
 ## Load execution identity migration
 
@@ -129,4 +129,4 @@ Outer `execution.runIdFormat`, `execution.debugIdFormat`, exact `--run-id` and `
 
 ## Load v1.9 readiness and windowed metrics
 
-Load scenarios using `att-load/v1.8` remain readable and normalize to `att-load/v1.9`. Current Load startup prepares only referenced DB/MQ/HTTP helpers before releasing the scheduler; RUN and Debug retain lazy resource behavior. `att-load-summary/v1.2` adds optional resource-preparation and `windowMetrics` data while preserving the existing summary fields. Reports default to the steady window; `thresholds.steady` and `thresholds.overall` opt into window-scoped evaluation. A window without sufficient completed evidence is `NOT_EVALUATED`, not a pass. See [Load mode](../execution-modes/load.md) for resource limits and metric definitions.
+Load scenarios using `att-load/v1.8` remain readable and normalize to `att-load/v1.9`. Current Load startup prepares only referenced DB/MQ/HTTP helpers before releasing the scheduler; RUN and Debug retain lazy resource behavior. `att-load-summary/v1.2` adds optional resource-preparation and `windowMetrics` data while preserving the existing summary fields. Reports default to the steady window; `thresholds.steady` and `thresholds.overall` opt into window-scoped evaluation. A window without sufficient completed evidence is `NOT_EVALUATED`, not a pass. See [Load mode](../reference/execution-modes/load.md) for resource limits and metric definitions.

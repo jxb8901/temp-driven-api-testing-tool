@@ -54,9 +54,9 @@ class LoadCrossModeTest {
         Path defaultPackage = findDefaultPackageRoot();
         for (String path : Arrays.asList(
                 "templates/V3_FLOW_EXAMPLE/template.yaml",
-                "templates/flows/common/compose/flow.yaml",
-                "templates/flows/common/identity/flow.yaml",
-                "templates/flows/common/decorate/flow.yaml")) {
+                "flows/common/compose/flow.yaml",
+                "flows/common/identity/flow.yaml",
+                "flows/common/decorate/flow.yaml")) {
             Path destination = project.resolve(path);
             Files.createDirectories(destination.getParent());
             Files.copy(defaultPackage.resolve(path), destination);
@@ -789,10 +789,10 @@ class LoadCrossModeTest {
 
     private Path findDefaultPackageRoot() throws Exception {
         for (Path candidate = Paths.get("").toAbsolutePath().normalize(); candidate != null; candidate = candidate.getParent()) {
-            Path packageRoot = candidate.resolve("packages/default");
+            Path packageRoot = candidate.resolve("packages/legacy");
             if (Files.isDirectory(packageRoot.resolve("templates/V3_FLOW_EXAMPLE"))) return packageRoot;
         }
-        throw new IllegalStateException("Could not locate the checked-in packages/default resources");
+        throw new IllegalStateException("Could not locate the checked-in packages/legacy resources");
     }
 
     private Path write(Path project, String relative, String content) throws Exception {

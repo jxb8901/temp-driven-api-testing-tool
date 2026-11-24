@@ -98,6 +98,69 @@ class WorkerMainTest {
         assertEquals(sidecar,terminal.path("result").path("summary").path("inspection").path("text").asText());
     }
 
+    @Test void nativeSuiteInputHonorsConfiguredCustomFlowRootWithoutDefaultFlows() throws Exception {
+        Path root=temp.resolve("native-suite-custom-flow-root");
+        Files.createDirectories(root.resolve("config"));
+        Files.createDirectories(root.resolve("custom-flows/payments"));
+        Files.createDirectories(root.resolve("testcase/payments"));
+        copyTree(Paths.get("schemas"),root.resolve("schemas"));
+        Files.write(root.resolve("package.yaml"),
+                ("schemaVersion: att-package/v2\nresources:\n  flowRoot: custom-flows\n  testcaseRoot: testcase\n")
+                        .getBytes(StandardCharsets.UTF_8));
+        Path config=root.resolve("config/config.yaml");
+        Files.write(config,("schemaVersion: att-config/v2.15\nenvironment: SIT\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("custom-flows/payments/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: payments.offline.v1\nname: Offline\n"
+                        +"description: Custom flowRoot Worker Suite fixture.\n"
+                        +"actions:\n  note:\n    type: log\n    message: custom-root\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("testcase/payments/testcase.yaml"),
+                ("schemaVersion: att-testcase/v1\nid: payments.offline\nflow: payments.offline.v1\n"
+                        +"name: Offline\ndescription: Custom flowRoot suite fixture.\ninputs: {}\n")
+                        .getBytes(StandardCharsets.UTF_8));
+        assertFalse(Files.exists(root.resolve("flows")));
+        assertFalse(Files.exists(root.resolve("templates")));
+
+        Map<String,Object> inspectRequest=fields("protocolVersion","att-worker/v1","jobId","native-suite-custom-root",
+                "command","inspect","packageRoot",root.toString(),"config",config.toString(),
+                "registeredPackageId","custom","environment","SIT",
+                "inspectionAction","native-suite-input",
+                "nativeSuiteDefinitionIds",Collections.singletonList("payments.offline"),
+                "nativeSuiteAll",Boolean.TRUE,
+                "maxSourceBytes",1048576,"maxResponseBytes",262144,
+                "safeTextSources",Collections.emptyList(),"externalTextSources",Collections.emptyList(),
+                "externalSourceRoots",Collections.emptyList(),"redactionEnabled",true,
+                "sensitivePaths",Collections.emptyList(),"sensitiveFieldPatterns",Collections.emptyList());
+        JsonNode inspected=runWorkerInspection(inspectRequest).path("result").path("summary").path("inspection");
+        assertEquals("ImplicitTestCaseSuite",inspected.path("kind").asText(),inspected.toString());
+        assertEquals(1,inspected.path("selectedCount").asInt());
+        assertEquals("payments.offline.default",inspected.path("selectedQualifiedCaseIds").path(0).asText());
+        assertEquals("payments.offline.v1",inspected.path("cases").path(0).path("flowId").asText());
+        assertEquals("testcase/payments/testcase.yaml",inspected.path("sourcePaths").path("payments.offline").asText());
+        assertTrue(inspected.path("sourceRevisions").path("payments.offline").asText().matches("[0-9a-f]{64}"));
+
+        Map<String,Object> pinnedSourcePaths=new LinkedHashMap<String,Object>();
+        pinnedSourcePaths.put("payments.offline","testcase/payments/testcase.yaml");
+        Map<String,Object> runRequest=fields("protocolVersion","att-worker/v1","jobId","native-suite-custom-root-run",
+                "command","run","packageRoot",root.toString(),"config",config.toString(),
+                "registeredPackageId","custom","environment","SIT",
+                "nativeSuiteDefinitionIds",Collections.singletonList("payments.offline"),
+                "nativeSuiteQualifiedCaseIds",Collections.singletonList("payments.offline.default"),
+                "nativeSuiteSourcePaths",pinnedSourcePaths,
+                "maxSourceBytes",1048576,"maxResponseBytes",262144,
+                "safeTextSources",Collections.emptyList(),"externalTextSources",Collections.emptyList(),
+                "externalSourceRoots",Collections.emptyList(),"redactionEnabled",true,
+                "sensitivePaths",Collections.emptyList(),"sensitiveFieldPatterns",Collections.emptyList());
+        JsonNode runResult=runWorkerInspection(runRequest);
+        assertEquals("RESULT",runResult.path("type").asText(),runResult.toString());
+        assertEquals("PASS",runResult.path("status").asText(),runResult.toString());
+        assertEquals("PASS",runResult.path("result").path("status").asText(),runResult.toString());
+        assertEquals("payments.offline.default",
+                runResult.path("result").path("summary").path("cases").path(0).path("qualifiedCaseId").asText());
+        assertEquals("payments.offline.v1",
+                runResult.path("result").path("summary").path("cases").path(0).path("flowId").asText());
+    }
+
     @Test void nativeCasePreviewWorkerUsesReadOnlyExcelAdapterAndReturnsStructuredDiagnostics() throws Exception {
         Path root=temp.resolve("native-case-preview-worker");
         Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("templates/flows/checkout/v1"));
@@ -703,10 +766,10 @@ class WorkerMainTest {
     @Test void cliWorkerAndDirectApiReturnEquivalentRunOutcomes() throws Exception {
         Path root=temp.resolve("run-package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates")); Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("tools"));
         copyTree(Paths.get("schemas"),root.resolve("schemas"));
-        Files.copy(Paths.get("packages/default/testcase/quick_start.xlsx"),root.resolve("testcase/quick_start.xlsx"));
-        Files.copy(Paths.get("packages/default/testcase/quick_start.yaml"),root.resolve("testcase/quick_start.yaml"));
-        Files.copy(Paths.get("packages/default/testcase/quick_start.xml"),root.resolve("testcase/quick_start.xml"));
-        copyTree(Paths.get("packages/default/templates/QUICK_START"),root.resolve("templates/QUICK_START"));
+        Files.copy(Paths.get("packages/legacy/testcase/quick_start.xlsx"),root.resolve("testcase/quick_start.xlsx"));
+        Files.copy(Paths.get("packages/legacy/testcase/quick_start.yaml"),root.resolve("testcase/quick_start.yaml"));
+        Files.copy(Paths.get("packages/legacy/testcase/quick_start.xml"),root.resolve("testcase/quick_start.xml"));
+        copyTree(Paths.get("packages/legacy/templates/QUICK_START"),root.resolve("templates/QUICK_START"));
         Files.createDirectories(root.resolve("tools/sample"));
         Files.copy(Paths.get("packages/default/tools/sample/tool-group.yaml"),root.resolve("tools/sample/tool-group.yaml"));
         Files.copy(Paths.get("packages/default/tools/sample/getAcDate.yaml"),root.resolve("tools/sample/getAcDate.yaml"));

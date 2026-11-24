@@ -1,36 +1,25 @@
 # Run functional tests
 
-This guide shows the legacy workbook/Sidecar/Snapshot compatibility path and runs a checked-in offline Case with `./att.sh run`. For Native Case commands in the unpublished 4.6.0 release-target stack, see the [Quick Start](../quick-start.md) and [current CLI Reference](../reference/cli.md).
+This guide runs the Native Case workflow described in the [Quick Start](../quick-start.md). Use `./att.sh` from the repository root to work with the default Package, or select another registered Package with `--package`.
 
 ## Build the source checkout
 
-~~~sh
-mvn -DskipTests -pl att-cli -am compile
-~~~
+```sh
+./build.sh
+```
 
-Packaged installations already contain application JARs.
+The build creates the runtime distribution and prepares the local CLI.
 
-## Generate and validate authored inputs
+## Validate Native inputs
 
-From the repository root, the launcher selects the default Package.
-
-~~~sh
-./att.sh snapshot --suite testcase/quick_start.xlsx
+```sh
 ./att.sh validate --package
-~~~
+```
 
-Snapshot generation writes the canonical workbook representation. Validation checks current configuration and Package inputs without invoking business Tools or creating Snapshots.
+Validation checks Native Definitions and their selected Flow/Tool dependencies. It does not submit a Server Job or start a LOAD scheduler.
 
-## Run a Case
+## Run selected Cases
 
-~~~sh
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
-~~~
+Use `run native-case` for one Definition/Case selection or `run native-suite` for an implicit Suite. Follow the [Quick Start](../quick-start.md) for complete commands and expected results. RUN validates the selection before execution and writes evidence under a new run directory.
 
-Use the Local Run ID and output directory in the result summary to find the execution evidence. For template, flow or tool diagnostics, the current compatibility command is standalone Debug:
-
-~~~sh
-./att.sh debug template PAYMENT_INVOKE
-~~~
-
-For target and selection semantics, see [Unified RUN](../reference/execution-modes/unified-run.md). Local CLI vNext syntax is [proposed for a later release](../interfaces/cli/vnext-proposed.md).
+To maintain a Package authored with an earlier model, use the [Legacy execution guide](../legacy/execution.md).

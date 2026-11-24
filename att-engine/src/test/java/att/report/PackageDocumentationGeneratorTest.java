@@ -13,6 +13,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Arrays;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class PackageDocumentationGeneratorTest {
     @TempDir Path tempDir;
@@ -49,6 +50,10 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("position:sticky;top:0"));
         assertTrue(html.contains("href=\"#testcases\""));
         assertTrue(html.contains("href=\"#flows\""));
+        assertTrue(html.contains("First-class reusable ordered Action sequences"));
+        assertTrue(html.contains("For older packages, see Legacy documentation"));
+        assertFalse(html.contains("Static reusable Template Action groups"));
+        assertFalse(html.contains("Legacy Template invocation semantics"));
         assertTrue(html.contains("sample.echo.v1"));
         assertTrue(html.contains("Documented Flow"));
         assertTrue(html.contains("href=\"#dbhelpers\""));
@@ -131,15 +136,58 @@ class PackageDocumentationGeneratorTest {
 
         String html = new String(Files.readAllBytes(new PackageDocumentationGenerator().generate(tempDir, config)), "UTF-8");
 
-        assertTrue(html.contains("<h2>suite.xlsx</h2>"));
-        assertTrue(html.contains("<h3>Sheet: Sheet A</h3>"));
-        assertTrue(html.contains("<h3>Sheet: Sheet B</h3>"));
+        assertTrue(html.contains("<h3>suite.xlsx</h3>"));
+        assertTrue(html.contains("<h4>Sheet: Sheet A</h4>"));
+        assertTrue(html.contains("<h4>Sheet: Sheet B</h4>"));
         assertTrue(html.contains("<th>Stages → Templates</th><th>Expected Result</th>"));
         assertFalse(html.contains("<th>Sheet</th>"));
         assertTrue(html.contains("<td class=\"multiline\">Check workbook.first.TC1\nSUCCESS\n${CASE.VARS.reference}</td>"));
         assertTrue(html.contains("data-tool=\"echo\""));
         assertTrue(html.contains("data-sheet=\"Sheet A\""));
-        assertTrue(html.indexOf("workbook.first.TC1") < html.indexOf("<h3>Sheet: Sheet B</h3>"));
+        assertTrue(html.indexOf("workbook.first.TC1") < html.indexOf("<h4>Sheet: Sheet B</h4>"));
+    }
+
+    @Test void indexesNativeDefinitionsFromDefaultPackageAndIgnoresOrphanWorkbooksWithoutTemplates() throws Exception {
+        Path defaultPackage = Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
+        if (!Files.isDirectory(defaultPackage.resolve("testcase")))
+            defaultPackage = Paths.get("").toAbsolutePath().normalize().getParent().resolve("packages/default");
+        assumeTrue(Files.isDirectory(defaultPackage.resolve("testcase")), "Default Package fixture is present");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30,
+                Paths.get("templates"), Collections.<String,ToolConfig>emptyMap(), null,
+                new RunConfig("timestamp", "yyyyMMdd"));
+        Path generated = new PackageDocumentationGenerator().generate(defaultPackage, config);
+        String html = new String(Files.readAllBytes(generated), "UTF-8");
+        assertTrue(html.contains("Native Case Definitions"));
+        assertTrue(html.contains("quick.start.single"));
+        assertTrue(html.contains("quick.start.inline"));
+        assertTrue(html.contains("quick.start.excel"));
+        assertTrue(html.contains("payments.offline.authorize"));
+        assertTrue(html.contains("payments.offline.settle"));
+        assertTrue(html.contains("href=\"#") && (html.contains("quick.start.v1") || html.contains("payments.offline")));
+        assertFalse(html.contains("Workbook documentation requires a Package templates/ root"));
+
+        Path nativeOnly = tempDir.resolve("native-only-docs");
+        Files.createDirectories(nativeOnly.resolve("flows/demo"));
+        Files.createDirectories(nativeOnly.resolve("testcase/demo"));
+        Files.write(nativeOnly.resolve("flows/demo/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: demo.v1\nname: Demo\ndescription: Docs fixture.\n"
+                        + "actions:\n  note: {type: log, message: hi}\n").getBytes("UTF-8"));
+        Files.write(nativeOnly.resolve("testcase/demo/testcase.yaml"),
+                ("schemaVersion: att-testcase/v1\nid: demo.case\nflow: demo.v1\nname: Demo\ninputs: {}\n")
+                        .getBytes("UTF-8"));
+        try (XSSFWorkbook workbook = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(nativeOnly.resolve("testcase/orphan.xlsx"))) {
+            Sheet sheet = workbook.createSheet("Data");
+            Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("ID");
+            Row row = sheet.createRow(1);
+            row.createCell(0).setCellValue("row-1");
+            workbook.write(output);
+        }
+        String nativeHtml = new String(Files.readAllBytes(new PackageDocumentationGenerator().generate(nativeOnly, config)), "UTF-8");
+        assertTrue(nativeHtml.contains("demo.case"));
+        assertTrue(nativeHtml.contains("demo.v1"));
+        assertFalse(nativeHtml.contains("orphan.xlsx"));
+        assertFalse(nativeHtml.contains("href=\"#templates\""));
     }
 
     private void writeWorkbook(Path path) throws Exception {

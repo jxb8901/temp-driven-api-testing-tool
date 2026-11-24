@@ -75,7 +75,7 @@ class EnvironmentProfileTest {
             assertEquals(Boolean.TRUE, json.get("valid"));
         }
 
-        CliResult debug = runCli(root, "debug", "template", "PAYMENT_INVOKE", "--config", config,
+        CliResult debug = runCli(projectRoot.resolve("packages/legacy"), "debug", "template", "PAYMENT_INVOKE", "--config", config,
                 "--env", "SIT", "--output-dir", temp.resolve("debug-output").toString(), "--format", "json", "--quiet");
         assertEquals(0, debug.exitCode, debug.stderr);
 

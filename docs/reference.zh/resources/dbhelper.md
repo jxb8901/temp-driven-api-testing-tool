@@ -16,7 +16,7 @@ connection:
 
 Credential 可從 environment variable 解析，但不能發布到 `META`、report 或 diagnostic。JDBC driver jar 由使用者放入 `lib/`；ATT 不內置 database driver。
 
-在現行 `att-template/v3.6` 契約中，DB operation 在普通 `type: tool` Action 內使用 `#{db.<id>.query(...)}`、`scalar(...)` 或 `update(...)` call。Call 必須有一個 String `sql` argument。SQL 若存放於 package，可使用 `sql=&{sql/find-order.sql}`；`sqlFile` 只供 historical compatibility。Positional `params` 與 named `parameters` 互斥，並使用相同 JDBC binding 規則。
+在 Native `att-flow/v3.6` 契約中，DB operation 在普通 `type: tool` Action 內使用 `#{db.<id>.query(...)}`、`scalar(...)` 或 `update(...)` call。Call 必須有一個 String `sql` argument。SQL 若存放於 package，可使用 `sql=&{sql/find-order.sql}`。Positional `params` 與 named `parameters` 互斥，並使用相同 JDBC binding 規則。
 
 Query 返回 typed row/scalar；update 返回規範的 update result。Operation、SQL/parameter evidence 進入 common Action envelope；secret credential 永遠不是 evidence。Parameter evidence 按 descriptor/Action 的 masking/type policy 處理。
 
@@ -84,11 +84,11 @@ LOAD 的 run-scoped connection provider 在 `scope: statement` 的每次 stateme
 
 LOAD `resources.db` 按 helper 增加 aggregate `totalConnectionHoldMs`、`releasedConnections`、`totalStatementMs`、`statementCount`、`activePeak` 及 sampled `observedWaitingPeak`，並保留原有 borrow count/wait/timeout metrics。Hold time 從借用成功至 close 完成；statement time 不含 pool acquisition，但包含結果與 resource cleanup。Sampled waiting peak 可能未捕捉短暫等待；所有 counter 都不包含 SQL、參數、URL 或 credential。`DB_POOL_TIMEOUT` 仍表示 SQL 執行前 acquisition 失敗；SQL timeout 與 Tool Action timeout 是獨立預算。
 
-validate、docs、snapshot 與 dry-run 都不會打開 DB Connection。dbhelper 文件路徑、ID、字段、SQL 文件和 template call 會在執行前校驗。
+Validate、docs 與 dry-run 都不會打開 DB Connection。dbhelper 文件路徑、ID、字段、SQL 文件和 Flow call 會在執行前校驗。
 
 DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
 
-以上 `waitForOrder` query 無需後續 Log Action。DBHelper 可作以下設定，自動保留 SQL*Plus-style row snapshot：
+以上 `waitForOrder` query 無需後續 Log Action。DBHelper 可作以下設定，自動保留 SQL*Plus-style row capture：
 
 ```yaml
 evidence:
@@ -99,4 +99,4 @@ evidence:
     maxChars: 10000
 ```
 
-`sql` 決定 SQL evidence；`parameters` 僅接受 `values`、`types` 或 `masked`（沒有 `no_mask` 選項），預設為 `values`。任何 parameter mode 都會繼續遮蔽 configured credentials。`output` 只控制 presentation；Assertion 和後續 Action 仍讀取 typed rows，`db.<id>.query`／`scalar` 遵循相同 policy。`maxChars` 預設 10000，範圍為 1 至 1000000。大型 `SELECT` 可能需要提高上限，才能保留完整 formatted snapshot。
+`sql` 決定 SQL evidence；`parameters` 僅接受 `values`、`types` 或 `masked`（沒有 `no_mask` 選項），預設為 `values`。任何 parameter mode 都會繼續遮蔽 configured credentials。`output` 只控制 presentation；Assertion 和後續 Action 仍讀取 typed rows，`db.<id>.query`／`scalar` 遵循相同 policy。`maxChars` 預設 10000，範圍為 1 至 1000000。大型 `SELECT` 可能需要提高上限，才能保留完整 formatted rendering。

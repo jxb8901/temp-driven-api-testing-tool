@@ -1,0 +1,13 @@
+schemaVersion: att-tool-group/v3.0
+id: fpp
+name: FPP reference tools
+description: Reference FPP API, SQLPlus, file and transaction-log integrations
+tools:
+  - exehelper.yaml
+  - inspectFiles.yaml
+  - invokeApi.yaml
+  - loghelper.yaml
+  - moveFiles.yaml
+  - querySqlplus.yaml
+  - searchText.yaml
+  - sqlplusToXml.yaml

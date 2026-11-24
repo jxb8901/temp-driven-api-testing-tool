@@ -23,15 +23,21 @@ class LoadAcceptanceTest {
     @TempDir Path temp;
 
     @Test void everyDocumentedExampleResolvesAndValidatesBeforeScheduling() throws Exception {
-        Path root = projectRoot();
         Path home = Paths.get("").toAbsolutePath().normalize();
-        FrameworkConfig config = new FrameworkConfigLoader().load(home.resolve("config/config.yaml"), home, root, "SIT");
-        List<String> examples = Arrays.asList("closed-minimal.yaml", "closed-smoke.yaml", "closed.yaml", "arrival-smoke.yaml", "arrival-rate.yaml", "tool.yaml");
-        for (String name : examples) {
-            Path scenarioFile = Paths.get("").toAbsolutePath().normalize().resolve("examples/load").resolve(name);
-            LoadScenario scenario = new LoadScenarioLoader(root).load(scenarioFile);
-            LoadTarget target = new LoadTargetResolver(root, config).resolve(scenario);
-            new LoadTargetValidator(root, config).validate(scenario, target);
+        Path legacy = home.resolve("packages/legacy");
+        FrameworkConfig legacyConfig = new FrameworkConfigLoader().load(home.resolve("config/config.yaml"), home, legacy, "SIT");
+        FrameworkConfig config = new FrameworkConfigLoader().load(home.resolve("config/config.yaml"), home, projectRoot(), "SIT");
+        for (String name : Arrays.asList("closed-minimal.yaml", "closed.yaml")) {
+            Path scenarioFile = home.resolve("examples/legacy/load").resolve(name);
+            LoadScenario scenario = new LoadScenarioLoader(legacy).load(scenarioFile);
+            LoadTarget target = new LoadTargetResolver(legacy, legacyConfig).resolve(scenario);
+            new LoadTargetValidator(legacy, legacyConfig).validate(scenario, target);
+        }
+        for (String name : Arrays.asList("closed-smoke.yaml", "arrival-smoke.yaml", "arrival-rate.yaml", "tool.yaml")) {
+            Path scenarioFile = home.resolve("examples/load").resolve(name);
+            LoadScenario scenario = new LoadScenarioLoader(projectRoot()).load(scenarioFile);
+            LoadTarget target = new LoadTargetResolver(projectRoot(), config).resolve(scenario);
+            new LoadTargetValidator(projectRoot(), config).validate(scenario, target);
         }
     }
 

@@ -43,6 +43,11 @@
           "minLength": 1,
           "maxLength": 512
         },
+        "flowRoot": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
         "testcaseRoot": {
           "type": "string",
           "minLength": 1,

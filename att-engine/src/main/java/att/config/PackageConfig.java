@@ -40,8 +40,8 @@ public final class PackageConfig {
     private final boolean present;
     private final String digest, schemaVersion, defaultEnvironment, name, description;
     private final List<String> tags;
-    private final Path templatesRoot, testcaseRoot;
-    private final boolean templatesDeclared, testcaseDeclared;
+    private final Path templatesRoot, flowRoot, testcaseRoot;
+    private final boolean templatesDeclared, flowDeclared, testcaseDeclared;
     private final List<Path> descriptors;
     private final Map<String, List<Path>> environmentDescriptors;
     private final Integer timeoutMs, htmlLimit, junitLimit;
@@ -76,8 +76,11 @@ public final class PackageConfig {
         if (metadata.containsKey("tags")) for (Object tag : (List<?>) metadata.get("tags")) tags.add((String) tag);
         this.tags = Collections.unmodifiableList(tags);
         Map<?, ?> resources = section(document, "resources");
-        this.templatesDeclared = resources.containsKey("templatesRoot"); this.testcaseDeclared = resources.containsKey("testcaseRoot");
+        this.templatesDeclared = resources.containsKey("templatesRoot");
+        this.flowDeclared = resources.containsKey("flowRoot");
+        this.testcaseDeclared = resources.containsKey("testcaseRoot");
         this.templatesRoot = safeRelative(root, resources.containsKey("templatesRoot") ? text(resources, "templatesRoot") : "templates");
+        this.flowRoot = safeRelative(root, resources.containsKey("flowRoot") ? text(resources, "flowRoot") : "flows");
         this.testcaseRoot = safeRelative(root, resources.containsKey("testcaseRoot") ? text(resources, "testcaseRoot") : "testcase");
         Map<?, ?> testdata = section(document, "testdata");
         this.descriptors = paths(root, testdata.get("descriptors"));
@@ -615,6 +618,7 @@ public final class PackageConfig {
     public String description() { return description; }
     public List<String> tags() { return tags; }
     public Path templatesRoot() { return templatesRoot; }
+    public Path flowRoot() { return flowRoot; }
     public Path testcaseRoot() { return testcaseRoot; }
     public List<Path> descriptors(String environment) { List<Path> selected = environmentDescriptors.get(environment.toLowerCase(Locale.ROOT)); return selected == null ? descriptors : selected; }
     /** Explicit Package-owned SUT Metric Sources, keyed by their schema-validated resource IDs. */
@@ -636,6 +640,7 @@ public final class PackageConfig {
         if (defaultEnvironment != null && !names.contains(defaultEnvironment.toLowerCase(Locale.ROOT))) throw invalid("defaultEnvironment", "unknown global environment");
     }
     public String templatesOrigin() { return templatesDeclared ? "package" : "runtime-default"; }
+    public String flowOrigin() { return flowDeclared ? "package" : "runtime-default"; }
     public String testcaseOrigin() { return testcaseDeclared ? "package" : "runtime-default"; }
     public Map<String, Object> declared(Path root) {
         Map<String, Object> out = new LinkedHashMap<String, Object>(); out.put("schemaVersion", schemaVersion);
@@ -645,6 +650,7 @@ public final class PackageConfig {
         if (defaultEnvironment != null) out.put("defaultEnvironment", defaultEnvironment);
         Map<String, Object> resources = new LinkedHashMap<String, Object>();
         if (templatesDeclared) resources.put("templatesRoot", templatesRoot.toString().replace('\\', '/'));
+        if (flowDeclared) resources.put("flowRoot", flowRoot.toString().replace('\\', '/'));
         if (testcaseDeclared) resources.put("testcaseRoot", testcaseRoot.toString().replace('\\', '/'));
         if (!resources.isEmpty()) out.put("resources", resources);
         Map<String, Object> testdata = new LinkedHashMap<String, Object>();

@@ -1,6 +1,6 @@
 # Actions 與 typed values
 
-本頁定義 ATT 現行 Action 契約。Template 使用 att-template/v3.6。每個完成的 Action 都會在 output.result 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite 物件。Resource 配置請從[Resources](resources/overview.md)開始查閱。
+本頁定義 ATT 現行 Action 契約。Native Flow Actions 使用 att-flow/v3.6。每個完成的 Action 都會在 output.result 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite 物件。Resource 配置請從[Resources](resources/overview.md)開始查閱。
 
 ## Action 類型
 
@@ -29,7 +29,7 @@ ATT 將 operation 的邏輯結果與人類可讀或 wire representation 分開�
 | 透過 HTTP/MQ 傳送抽象 Map/List | requestFormat | 在 outbound boundary 序列化該值。 |
 | Log 或 resource evidence | format / evidence.output.format | 產生人類可讀表示。 |
 
-DB result 本身已是型別化值。Tool、Action、Template、Flow 和 expression results 在 ATT 中傳遞時均保留型別。
+DB result 本身已是型別化值。Tool、Action、Flow 和 expression results 在 ATT 中傳遞時均保留型別。
 
 DB query、scalar、update operation 在普通 `type: tool` Action 內使用 `db.<helper>.query(...)`、`db.<helper>.scalar(...)`、`db.<helper>.update(...)`。DB call 接受一個 String `sql`，以及 `params` 或 `parameters` 其中一種；`sql=&{package-relative-file.sql}` 可提供 package SQL 內容。歷史 `type: db` Action 只由 archived schema 保留。
 
@@ -41,12 +41,12 @@ DB query、scalar、update operation 在普通 `type: tool` Action 內使用 `db
 requestText:
   type: assign
   name: requestText
-  expression: "&{templates/payment/payload/request.xml}"
+  expression: "&{payload/payment/request.xml}"
 ~~~
 
 `${...}` 仍然是 Context reference，`#{...}` 仍然是 expression/call，`&{...}` 是 static、one-file locator；v1 沒有 glob 或 dynamic locator。Locator 相對 canonical ATT package root。`./` 或 `../` descriptor-relative path 只有在 canonical target 仍在該 root 內才允許。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白和 glob syntax 都會在 validation 失敗。
 
-普通 UTF-8 file 會原樣回傳。如果 file 包含 `${...}` 或 `#{...}`，ATT 只 compile 一次這些 node，並在每次 execution 評估；compiled plan immutable，dynamic value 不會被當成第二份 template 重新 parse。Run 和 Debug 會重用 plan，直到 file fingerprint 改變。Load 會在 scheduling 前 validation 並 capture selected file identity、content 和 compiled dependency closure，因此 active iteration 看到穩定 snapshot。
+普通 UTF-8 file 會原樣回傳。如果 file 包含 `${...}` 或 `#{...}`，ATT 只 compile 一次這些 node，並在每次 execution 評估；compiled plan immutable，dynamic value 不會再次解析成新的 expression source。Run 和 Debug 會重用 plan，直到 file fingerprint 改變。Load 會在 scheduling 前 validation 並 capture selected file identity、content 和 compiled dependency closure，因此 active iteration 看到immutable dependency closure。
 
 若要由後續 Action 重用 String，使用 Assign：
 
@@ -54,7 +54,7 @@ requestText:
 requestText:
   type: assign
   name: requestText
-  expression: "&{templates/payment/payload/request.xml}"
+  expression: "&{payload/payment/request.xml}"
 
 sendRequest:
   type: tool
@@ -168,7 +168,7 @@ logOrder:
   format: yaml
 ~~~
 
-Log 是一般 Case-log entry，沒有 user-authored severity；現行 v3.6 契約移除 `level`，migration 時請刪除該欄位。歷史 v3.4/v3.5 Template／Flow descriptor 為 compatibility 仍接受其 schema 定義的 Log level。Internal diagnostic severity 維持獨立。message 或 value 至少要有一項。message 以文字求值。value 可接受任意型別化值，包括巢狀 map/list。完整的 ${...} 和 #{...} expression 保留原始型別；map/list 子節點會遞迴求值，不會將數字、布林、null 或巢狀值轉成字串。format 支援 text、json、yaml、xml、sqlplus，只控制寫入 Case 日誌的字串。指定 format 時必須提供 value。
+Log 是一般 Case-log entry，沒有 user-authored severity；現行 v3.6 契約移除 `level`，migration 時請刪除該欄位。較早 Log-level 行為見[舊版 authoring guide](../legacy/authoring.zh.md)。Internal diagnostic severity 維持獨立。message 或 value 至少要有一項。message 以文字求值。value 可接受任意型別化值，包括巢狀 map/list。完整的 ${...} 和 #{...} expression 保留原始型別；map/list 子節點會遞迴求值，不會將數字、布林、null 或巢狀值轉成字串。format 支援 text、json、yaml、xml、sqlplus，只控制寫入 Case 日誌的字串。指定 format 時必須提供 value。
 
 同時提供 message 和 value 時，Log 輸出 message、換行，再輸出格式化 value。output.result 是最終字串。File-content String 會原樣輸出；Log 不會推斷或附加 document format，也不會讀取檔案或使用 fields map。需要結構化日誌時，將 typed map/list 放到 value。
 
@@ -176,7 +176,7 @@ Log 是一般 Case-log entry，沒有 user-authored severity；現行 v3.6 契�
 
 Action expression 使用一般 ATT expression engine。完整 ${...} 或 #{...} expression 保留結果型別；expression 放在一般字串內才會成為 String。請參閱[Expressions and Built-ins](expressions.md)。
 
-assign 會將 typed value 發布至 EXEC.VARS.<name> 一次。name 必須符合 [A-Za-z_][A-Za-z0-9_]*，且在 Case 中唯一。使用相同的 name 和 expression 欄位可透過 set 更新既有的頂層 EXEC.VARS 值；set 不會宣告不存在的變數。Expression 會讀取更新前的 Context 值，並只在評估及 assertion 成功後發布，保留原生型別。set 可使用共用 Action retry block：每次 attempt 都以尚未更新的變數評估；失敗 attempt 保留原值，只有 winning attempt 會發布一次。Attempt 狀態及 retry decision 保留在 output.attempts。兩種 Action 的 EXEC.VARS 都會跨 Stage 和巢狀 Flow 共用。set 更新 Debug/Load bootstrap 變數時會消耗首次 assign 的許可；之後的 assign 不可覆寫該更新。Action 執行期間可讀取 output.*，發布後可讀取 EXEC.ACTIONS.<id>.output.*。Flow 有暫時 Action namespace；EXEC.VARS 更新仍會保留給 caller。
+assign 會將 typed value 發布至 EXEC.VARS.<name> 一次。name 必須符合 [A-Za-z_][A-Za-z0-9_]*，且在 Case 中唯一。使用相同的 name 和 expression 欄位可透過 set 更新既有的頂層 EXEC.VARS 值；set 不會宣告不存在的變數。Expression 會讀取更新前的 Context 值，並只在評估及 assertion 成功後發布，保留原生型別。set 可使用共用 Action retry block：每次 attempt 都以尚未更新的變數評估；失敗 attempt 保留原值，只有 winning attempt 會發布一次。Attempt 狀態及 retry decision 保留在 output.attempts。兩種 Action 的 EXEC.VARS 都會在順序執行的 Actions 和巢狀 Flow 間共用。set 更新 Debug/Load bootstrap 變數時會消耗首次 assign 的許可；之後的 assign 不可覆寫該更新。Action 執行期間可讀取 output.*，發布後可讀取 EXEC.ACTIONS.<id>.output.*。Flow 有暫時 Action namespace；EXEC.VARS 更新仍會保留給 caller。
 
 ~~~yaml
 initializeCounter:
@@ -202,7 +202,7 @@ evidence:
     maxChars: 10000
 ~~~
 
-此設定會在 operation metadata 旁加入有長度上限的人類可讀 Snapshot，不會改變 output.result 或 response parsing。Load 的 evidence.resources.output 可設 inherit（預設）或 none。none 會略過 resource-output 格式化與檔案物化。Metrics-only iteration 不建立 execution 目錄。Iteration evidence 被保留後，符合條件的 resource output 才會延遲格式化至該 workspace。
+此設定會在 operation metadata 旁加入有長度上限的有界的人類可讀 rendering，不會改變 output.result 或 response parsing。Load 的 evidence.resources.output 可設 inherit（預設）或 none。none 會略過 resource-output 格式化與檔案物化。Metrics-only iteration 不建立 execution 目錄。Iteration evidence 被保留後，符合條件的 resource output 才會延遲格式化至該 workspace。
 
 ## Action output 與 Evidence path
 
@@ -220,7 +220,7 @@ evidence:
 | `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | 指定 retry attempt 的 collector result/status；後續成功後仍保留較早 attempt。 |
 | `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.error/evidence` | 該 collector attempt 的 failure summary 與 underlying evidence。 |
 
-String、Number、Boolean、null、Map、List 等值跨越 Action/Template/Flow boundary 時都保留原型別。
+String、Number、Boolean、null、Map、List 等值跨越 Action/Flow boundary 時都保留原型別。
 
 ## 共用 Retry 與 boolean condition
 

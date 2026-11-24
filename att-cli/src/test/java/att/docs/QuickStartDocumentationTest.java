@@ -31,22 +31,26 @@ class QuickStartDocumentationTest {
     void quickStartAssetsAndLanguageEntryPointsStayAligned() throws Exception {
         Path root = Paths.get("").toAbsolutePath().normalize();
         Path packageRoot = root.resolve("packages/default");
+        Path legacyRoot = root.resolve("packages/legacy");
 
         for (String relative : Arrays.asList(
-                "templates/flows/quick-start/flow.yaml",
+                "flows/quick-start/flow.yaml",
                 "testcase/quick-start/single/testcase.yaml",
                 "testcase/quick-start/inline-multi/testcase.yaml",
                 "testcase/quick-start/excel/testcase.yaml",
                 "testdata/quick-start-native.xlsx",
-                "testcase/quick_start.xlsx",
-                "testcase/quick_start.yaml",
-                "testcase/quick_start.xml",
-                "templates/QUICK_START/template.yaml",
                 "docs/quick-start.md",
                 "docs/quick-start.zh.md",
                 "docs/maintenance/native-case-default-package-migration-s12.md")) {
             Path assetRoot = relative.startsWith("docs/") ? root : packageRoot;
             assertTrue(Files.isRegularFile(assetRoot.resolve(relative)), "Missing Quick Start asset: " + relative);
+        }
+        for (String relative : Arrays.asList(
+                "testcase/quick_start.xlsx",
+                "testcase/quick_start.yaml",
+                "testcase/quick_start.xml",
+                "templates/QUICK_START/template.yaml")) {
+            assertTrue(Files.isRegularFile(legacyRoot.resolve(relative)), "Missing Legacy Quick Start asset: " + relative);
         }
 
         String en = read(root.resolve("docs/quick-start.md"));
@@ -63,13 +67,15 @@ class QuickStartDocumentationTest {
         assertTrue(zh.contains("report/index.html"));
         assertTrue(en.contains("ci/summary.json"));
         assertTrue(zh.contains("ci/summary.json"));
-        assertTrue(en.contains("testcase/quick_start.xlsx"));
-        assertTrue(zh.contains("testcase/quick_start.xlsx"));
-        assertTrue(en.contains("quickStart.default.QS001"));
-        assertTrue(zh.contains("quickStart.default.QS001"));
+        assertFalse(en.contains("quickStart.default.QS001"));
+        assertFalse(zh.contains("quickStart.default.QS001"));
+        assertTrue(read(root.resolve("docs/legacy/execution.md")).contains("testcase/quick_start.xlsx"));
+        assertTrue(read(root.resolve("docs/legacy/execution.zh.md")).contains("testcase/quick_start.xlsx"));
         assertTrue(readme.contains("docs/quick-start.md"));
         assertTrue(readme.contains("docs/quick-start.zh.md"));
         assertTrue(readme.contains("run native-case quick.start.single"));
+        assertTrue(readme.contains("docs/legacy/README.md"));
+        assertFalse(readme.contains("./att.sh run --suite testcase/quick_start.xlsx"));
 
         assertLocalMarkdownLinksResolve(root.resolve("docs/quick-start.md"), root);
         assertLocalMarkdownLinksResolve(root.resolve("docs/quick-start.zh.md"), root);
@@ -131,7 +137,7 @@ class QuickStartDocumentationTest {
     @Test
     void legacyQuickStartAndPaymentRegressionRemainRunnable() throws Exception {
         Path root = Paths.get("").toAbsolutePath().normalize();
-        Path packageRoot = root.resolve("packages/default");
+        Path packageRoot = root.resolve("packages/legacy");
         String config = root.resolve("config/config.yaml").toString();
         String suite = packageRoot.resolve("testcase/quick_start.xlsx").toString();
 
@@ -156,8 +162,9 @@ class QuickStartDocumentationTest {
 
         // Safe offline evidence for the retained multi-Stage fixture: dry-run skips all rows
         // without calling FPP/MQ/DB Tools. Full business execution remains #398 / integration-only.
-        CliResult paymentRegression = runCli(packageRoot, "run", "--config", config,
-                "--suite", packageRoot.resolve("testcase/payment_regression.xlsx").toString(),
+        Path legacyRoot = root.resolve("packages/legacy");
+        CliResult paymentRegression = runCli(legacyRoot, "run", "--config", config,
+                "--suite", legacyRoot.resolve("testcase/payment_regression.xlsx").toString(),
                 "--dry-run", "--format", "json", "--quiet",
                 "--output-dir", temp.resolve("payment-regression-output").toString(),
                 "--run-id", "payment-regression-dry");

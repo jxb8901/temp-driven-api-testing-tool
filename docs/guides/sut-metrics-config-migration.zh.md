@@ -2,7 +2,7 @@
 
 目前的設定契約將共用連線與指標定義分開。Global `att-config/v2.15` 保留 Data Source 連線描述檔；所選 Package 透過明確的 `att-package/v2` 清單管理自己的 Metric Source、Group 和 Profile。LOAD Scenario 必須選擇該 Package 的 Profile，才會收集指標。
 
-完整檔案結構請參閱 [Package-local SUT Metrics 範例](../../examples/package-local-sut-metrics/README.md)。範例包含 Global SIT/UAT 連線描述檔，以及一個 Package 的指標定義。
+完整檔案結構請參閱 [Package-local SUT Metrics 範例](../../examples/package-local-sut-metrics/README.md)。範例包含 Global SIT/UAT 連線描述檔，以及一個 Package 的指標定義。舊的 Settings catalog（`source.json` 和 v1 composite profile）封存在 [examples/legacy/sut-metrics](../../examples/legacy/sut-metrics/README.zh.md)。不要在 Settings 註冊那些檔案。
 
 ## 遷移後的所有權
 

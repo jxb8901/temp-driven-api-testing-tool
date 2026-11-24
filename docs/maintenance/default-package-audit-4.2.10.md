@@ -60,7 +60,7 @@ Baseline was built from commit `0ec52acf` before the #368 edits; final commands 
 
 Final report summary for each command: `attVersion=4.2.10`, `valid=true`, `errors=0`, `warnings=0`, `suites=3`, `cases=26`, `templates=10`, `tools=21`. The source-checkout launcher prints a Log4j2 “no logging implementation” status message to stderr; it is not present in the validation report and does not indicate a Package warning. Validation is read-only; the checks did not launch business resources or mutate the Package.
 
-The original LOAD runtime finding was not visible to static `att validate`: Quick Load failed in `templates/flows/common/identity/flow.yaml`, Action `identityValue`, while resolving `${META.SOURCE.caseId}`. The supported shared Flow path now passes offline in all four modes. Intentionally mode-specific business examples remain restricted and produce an actionable source-Action diagnostic when invoked from Load.
+The original LOAD runtime finding was not visible to static `att validate`: Quick Load failed in `flows/common/identity/flow.yaml`, Action `identityValue`, while resolving `${META.SOURCE.caseId}`. The supported shared Flow path now passes offline in all four modes. Intentionally mode-specific business examples remain restricted and produce an actionable source-Action diagnostic when invoked from Load.
 
 ## Verification record
 

@@ -1,14 +1,12 @@
 # Load mode
 
-ATT accepts att-load/v1.9 scenarios. A scenario has one or more workloads; each workload uses either one fixed Template, Flow or Tool target, or a closed-user weighted mix of targets. Workloads own their inputs, testdata policy, bootstrap vars and pacing policy. Root defaults may be shared by all workloads, while workload-local fields override them. ATT validates and pre-resolves every configured target before a scheduler starts.
-
-Descriptors using the previous workload schema remain compatible and are normalized to the current schema when loaded.
+ATT accepts `att-load/v1.9` scenarios. Each workload uses one Flow or Tool target, or a closed-user weighted mix of those targets. For an existing Package authored with an earlier model, see the [Legacy documentation](../../legacy/README.md). Workloads own their inputs, testdata policy, bootstrap vars and pacing policy. Root defaults may be shared by all workloads, while workload-local fields override them. ATT validates and pre-resolves every configured target before a scheduler starts.
 
 Run `./att.sh load` with no scenario to discover valid full Load descriptors under `load/`. Only YAML declaring `schemaVersion: att-load/*` is considered; unrelated YAML is ignored, while invalid declared descriptors are shown with their diagnostics. Discovery resolves and validates targets without starting a scheduler or making resource calls.
 
 ## Prepare referenced resources before LOAD starts
 
-After target validation and Load plan preparation, ATT discovers only DB, MQ and HTTP helpers reachable from the selected Template, Flow, primary Tool calls, nested Tool calls, and frozen Render payload expressions. It prepares these resources before the scheduler start gate opens. Unused helpers in global configuration are not opened. A reference that cannot be resolved statically is reported as `SKIPPED_DYNAMIC` and remains lazy on first use.
+After target validation and Load plan preparation, ATT discovers only DB, MQ and HTTP helpers reachable from the selected Flow and primary Tool calls, nested Tool calls, and frozen Render payload expressions. It prepares these resources before the scheduler start gate opens. Unused helpers in global configuration are not opened. A reference that cannot be resolved statically is reported as `SKIPPED_DYNAMIC` and remains lazy on first use.
 
 For each referenced DB helper, startup creates distinct physical connections sufficient for `max(1, minIdle)` simultaneous ready sessions. The configured `minIdle` and `maxSize` remain unchanged; normal pool growth stays lazy. MQ readiness creates idle connections for the configured physical instances but does not open queues, send messages or issue business requests. HTTP readiness builds the client and TLS configuration only; it does not connect or send a request.
 
@@ -16,7 +14,7 @@ Preparation is bounded to 64 initial DB/MQ sessions per run and 256 per Worker J
 
 ## Independent evidence quotas
 
-`att-load/v1.9` supports two quota models. Legacy scenarios keep their existing quota scopes and hard-cap sizes: `maxSamples` is one combined run cap, and `maxFailureSamples` enables shared success/failure caps across the whole run. A scenario that omits both keys also keeps the existing mode defaults, including uncapped-by-default `all`. For capped runs, the retained set now follows fixed run-time windows, so which iterations are retained can differ from earlier releases while the configured cap and outcome-sharing rules stay the same.
+`att-load/v1.9` supports shared run-level quotas and optional independent per-workload quotas. Capped evidence follows fixed run-time windows, so the retained set reflects both the configured cap and each window.
 
 The optional `evidence.quotaScope: perWorkload` selects the independent model. It is explicit so an existing scenario is never silently reinterpreted:
 
@@ -31,7 +29,7 @@ evidence:
     maxFailureSamples: 20
 workloads:
   - id: payment-api
-    target: {type: template, id: PAYMENT_INVOKE}
+    target: {type: flow, id: common.payment.v1}
     load: {users: 10, duration: 2m}
   - id: mq-processing
     target: {type: tool, id: sample.getAcDate}
@@ -51,9 +49,9 @@ Each workload owns its caps. Reaching one workload's success or failure cap neve
 
 Sampled-success eligibility uses MurmurHash3 x86 32-bit, seed 0, over the iteration ID encoded as UTF-8. ATT interprets the 32-bit result as unsigned and selects it when it is below `floor(sampleRate × 2^32)`; the resolved policy reports `murmur3-32-v1`. Hash qualification is not retention: an eligible success still needs an available quota slot and an evidence artifact.
 
-Capped evidence slots are allocated across up to ten equal windows of the planned run duration, separately for each outcome cap and workload cap. The windows use scheduled arrival time; a cap below ten uses one window per slot. Slots are append-only: there is no replacement, revocation, borrowing from empty windows, or deletion of already retained artifacts. Candidates are first-come within each window, so a small cap, an empty window, or an uneven candidate rate can still limit representativeness. Legacy `maxSamples` keeps its single combined cap; successes and failures share each window's slots. Uncapped retention and direct store callers without a scheduler timeline keep their existing behavior.
+Capped evidence slots are allocated across up to ten equal windows of the planned run duration, separately for each outcome cap and workload cap. The windows use scheduled arrival time; a cap below ten uses one window per slot. Slots are append-only: there is no replacement, revocation, borrowing from empty windows, or deletion of already retained artifacts. Candidates are first-come within each window, so a small cap, an empty window, or an uneven candidate rate can still limit representativeness. Uncapped retention and direct store callers without a scheduler timeline keep their existing behavior.
 
-`load-summary.json` / YAML, the HTML report and Studio job results expose the resolved sampling hash and retention strategy, completed successes, hash-qualified successes, sampling-ineligible successes, retained evidence, success/failure quota denials, outcome-unclassified compatibility reservations, and missing artifacts. For sampled runs, completed successes equal hash-qualified plus sampling-ineligible successes. Quota denials are counted once for the final outcome when a sampled success later fails; missing artifacts count only an already reserved completed outcome. These fields describe different stages and are not an additive retention funnel. Workload rows also include target IDs and effective per-workload caps. Reports show retained coverage by time window and phase, and warn when a legacy combined or category quota denies candidates; aggregate metrics, thresholds and failure events continue. Retained links remain under `samples/` and `failures/` with EXEC.ID, case.log and case.yaml. Studio separates legacy/shared caps from the explicit per-workload scope, shows effective defaults and workload overrides, and keeps advanced JSON synchronized. See [the per-workload example](../../../examples/load/independent-evidence.yaml).
+`load-summary.json` / YAML, the HTML report and Studio job results expose the resolved sampling hash and retention strategy, completed successes, hash-qualified successes, sampling-ineligible successes, retained evidence, success/failure quota denials, outcome-unclassified reservations, and missing artifacts. For sampled runs, completed successes equal hash-qualified plus sampling-ineligible successes. Quota denials are counted once for the final outcome when a sampled success later fails; missing artifacts count only an already reserved completed outcome. These fields describe different stages and are not an additive retention funnel. Workload rows also include target IDs and effective per-workload caps. Reports show retained coverage by time window and phase, and warn when a combined or category quota denies candidates; aggregate metrics, thresholds and failure events continue. Retained links remain under `samples/` and `failures/` with EXEC.ID, case.log and case.yaml. Studio separates shared caps from the explicit per-workload scope, shows effective defaults and workload overrides, and keeps advanced JSON synchronized. See [the per-workload example](../../../examples/load/independent-evidence.yaml).
 
 
 ## Define a Load scenario
@@ -63,7 +61,7 @@ schemaVersion: att-load/v1.9
 testdata: [examples/testdata/generated-account.yaml]
 workloads:
   - id: payment
-    target: {type: template, id: PAYMENT_INVOKE}
+    target: {type: flow, id: common.payment.v1}
     inputs: {region: HK, account: "@{generatedAccounts}", accountId: "@{generatedAccounts.id}"}
     testdata:
       generatedAccounts:
@@ -94,7 +92,7 @@ evidence:
 
 ## Distribute closed-user work across targets
 
-A workload can declare `mix` instead of `target` to distribute each closed user's next iteration across pre-resolved targets. Every entry has a unique `id`, a positive integer `weight`, and a Template, Flow or Tool `target`. The selector uses the run seed, workload ID, stable VU ID and that VU's iteration number; changing targets does not reset the VU or its think-time stream. Weights express selection probability, not a promise that a short run will match the exact ratio.
+A workload can declare `mix` instead of `target` to distribute each closed user's next iteration across pre-resolved targets. Every entry has a unique `id`, a positive integer `weight`, and a Flow or Tool `target`. The selector uses the run seed, workload ID, stable VU ID and that VU's iteration number; changing targets does not reset the VU or its think-time stream. Weights express selection probability, not a promise that a short run will match the exact ratio.
 
 ~~~yaml
 schemaVersion: att-load/v1.9
@@ -105,7 +103,7 @@ workloads:
     mix:
       - id: browse
         weight: 60
-        target: {type: template, id: BROWSE}
+        target: {type: flow, id: common.payment.v1}
         inputs: {operation: browse}
       - id: purchase
         weight: 30
@@ -121,12 +119,12 @@ Workload `inputs` and `vars` provide defaults; an entry's same-named top-level k
 
 The run summary and HTML report include configured weights, observed selection counts, and bounded per-entry metrics. Overall and workload percentiles are calculated from their own aggregate latency collectors; ATT does not average per-entry percentiles to produce them. Events and retained evidence include the selected `mixId` and target identity.
 
-A target accepts template, flow or tool; Tool targets may provide named arguments but cannot declare bootstrap vars. Workload inputs become EXEC.INPUT for each iteration; Template/Flow workload vars become a fresh initial EXEC.VARS tree for every started iteration. Workloads must share one model (closed users or arrivalRate) and one warmup/rampUp/duration/rampDown envelope. They are independently paced fixed targets, not a transaction mix.
+A target accepts flow or tool; Tool targets may provide named arguments but cannot declare bootstrap vars. Workload inputs become EXEC.INPUT for each iteration; Flow workload vars become a fresh initial EXEC.VARS tree for every started iteration. Workloads must share one model (closed users or arrivalRate) and one warmup/rampUp/duration/rampDown envelope. They are independently paced fixed targets, not a transaction mix.
 
 | Workload field | Runtime destination | Contract |
 |---|---|---|
 | `inputs` | `EXEC.INPUT` | Business input values; not bootstrap variables |
-| `vars` | initial `EXEC.VARS` | Typed expression tree for Template/Flow; independently evaluated per execution |
+| `vars` | initial `EXEC.VARS` | Typed expression tree for Flow; independently evaluated per execution |
 | `target.arguments` | Tool arguments | Tool-only call arguments; separate from `EXEC.INPUT` and `EXEC.VARS` |
 
 ATT snapshots each iteration's input map once as a deeply immutable tree. Request metadata copies reuse that snapshot, and the Load adapter passes its nested values through into the per-iteration `EXEC.INPUT` map without copying them again. A later change to the caller's source map cannot affect a started iteration, and separate iterations do not share their input snapshots.
@@ -139,11 +137,11 @@ Use `inputs` to map `@{id}`, `@{id.path}`, or scalar interpolation into `EXEC.IN
 
 Selection evidence records only the testdata ID, source layer, record index, generated sequence where applicable, scope, strategy, and random seed. It never includes record contents. Run and Debug load only IDs used in mappings; Load validates referenced IDs and explicit workload policies before starting.
 
-## Initialize Template and Flow variables
+## Initialize Flow variables
 
-After the scheduler identity and unique EXEC.ID/EXEC.OUTPUT_DIR are ready, ATT evaluates each workload's `vars` tree before starting its Template or Flow. Exact `${...}` references preserve native types, mixed text becomes a string, `#{...}` uses the ordinary typed expression parser, and nested maps/lists are evaluated recursively. References between vars are declaration-order independent; missing vars and dependency cycles fail before the target starts. Each iteration owns its evaluated maps/lists, so concurrent users and workloads cannot share mutations. The first normal `assign` may replace a bootstrapped variable; a successful `set` updates that value and consumes the first-assign allowance. Each iteration's sets remain isolated from every other iteration.
+After the scheduler identity and unique EXEC.ID/EXEC.OUTPUT_DIR are ready, ATT evaluates each workload's `vars` tree before starting its Flow. Exact `${...}` references preserve native types, mixed text becomes a string, `#{...}` uses the ordinary typed expression parser, and nested maps/lists are evaluated recursively. References between vars are declaration-order independent; missing vars and dependency cycles fail before the target starts. Each iteration owns its evaluated maps/lists, so concurrent users and workloads cannot share mutations. The first normal `assign` may replace a bootstrapped variable; a successful `set` updates that value and consumes the first-assign allowance. Each iteration's sets remain isolated from every other iteration.
 
-Bootstrap expressions may use initialized `EXEC.RUN_ID`, `EXEC.ID`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.LOAD`, other `EXEC.VARS.<name>` values, and stable project/source/target/template metadata. `EXEC.ACTIONS`, action-local `output`, invocation-scoped metadata, and Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are unavailable. Only safe pure built-ins are permitted. Tool arguments remain separate from `vars`.
+Bootstrap expressions may use initialized `EXEC.RUN_ID`, `EXEC.ID`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.LOAD`, other `EXEC.VARS.<name>` values, and stable project/source/target metadata. `EXEC.ACTIONS`, action-local `output`, invocation-scoped metadata, and Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are unavailable. Only safe pure built-ins are permitted. Tool arguments remain separate from `vars`.
 
 ## Choose a closed-user or arrival-rate workload
 
@@ -171,7 +169,7 @@ duration is required. rampUp, warmup and rampDown default to zero. Generation ru
 
 ## Identify iterations and find their artifacts
 
-Every started iteration receives an engine-managed `EXEC.ID` before bootstrap vars and target execution; `EXEC.RUN_ID` remains the enclosing Run. See [ID initialization](#check-execution-id-fields-before-use).
+Every started iteration receives an engine-managed `EXEC.ID` before bootstrap vars and target execution; `EXEC.RUN_ID` remains the enclosing Run. See the [Legacy documentation](../../legacy/README.md) for earlier ID initialization notes.
 
 Generated IDs must be non-empty, path-safe segments. Duplicate IDs fail before the target starts; ATT does not silently append a suffix.
 
@@ -203,9 +201,9 @@ evidence.resources.output accepts inherit (default) or none. none disables optio
 
 ATT writes bounded load-summary.json/yaml and a self-contained report/index.html below the run root. The report shows EXEC.ID for retained executions, workload/target identity, status, timing and case.log links when available. Aggregate latency percentiles use the aggregate latency collector; ATT does not average workload percentiles.
 
-Direct Engine/CLI `OperationResult` output keeps its legacy full-summary detail shape; its schema definition remains under `schemas/history/`. The archived report emitted by `LoadReportWriter` uses additive `att-load-summary/v1.3` and moves large aggregate/per-workload metric collections into relative `details/v1/` sidecars referenced by `details/v1/manifest.json`. Inline collections have at most 32 preview items, each sidecar chunk is at most 4 MiB, the sidecar set is capped at 100 MiB/9,000 files, and complete report output is capped at 120 MiB; each main report file remains at or below 16 MiB. Aggregate counters and thresholds remain exact. Server-mediated Job Results use `att-load-terminal-result/v1` in `result.summary`: execution outcome, performance verdict, aggregate counters, bounded workload/threshold previews, primary diagnostic and detail/archive state. The compact summary is capped at 32 KiB; measured terminal journal and SSE envelopes stay below 48 KiB, below the unchanged 64 KiB journal event-data limit. The 1 MiB Worker frame limit is also unchanged. Existing LOAD scheduling, virtual-user and arrival-rate semantics do not change.
+Direct Engine/CLI `OperationResult` output keeps its legacy full-summary detail shape; its schema definition remains under `schemas/history/`. The archived report emitted by `LoadReportWriter` uses additive `att-load-summary/v1.3` and moves large aggregate/per-workload metric collections into relative `details/v1/` detail files referenced by `details/v1/manifest.json`. Inline collections have at most 32 preview items, each detail file chunk is at most 4 MiB, the detail file set is capped at 100 MiB/9,000 files, and complete report output is capped at 120 MiB; each main report file remains at or below 16 MiB. Aggregate counters and thresholds remain exact. Server-mediated Job Results use `att-load-terminal-result/v1` in `result.summary`: execution outcome, performance verdict, aggregate counters, bounded workload/threshold previews, primary diagnostic and detail/archive state. The compact summary is capped at 32 KiB; measured terminal journal and SSE envelopes stay below 48 KiB, below the unchanged 64 KiB journal event-data limit. The 1 MiB Worker frame limit is also unchanged. Existing LOAD scheduling, virtual-user and arrival-rate semantics do not change.
 
-Full buckets, failure samples, workload details, threshold details and evidence remain in `load-summary.json`, `load-summary.yaml`, `report/index.html` and the versioned sidecars. The Server exposes those through the existing authorized artifact archive routes. Studio shows the compact result first, loads evidence/workload previews when Results is opened, and loads metric-series sidecars when Metrics is opened. No artifact request is made on the initial Job Details load. Archive availability is independent from execution outcome; `PENDING`, `ARCHIVING`, `READY`, `FAILED` or omitted details do not change terminal status or exit code. ERROR and INVALID keep their real runtime/preparation/validation cause ahead of Worker/Journal truncation and archive diagnostics.
+Full buckets, failure samples, workload details, threshold details and evidence remain in `load-summary.json`, `load-summary.yaml`, `report/index.html` and the versioned detail files. The Server exposes those through the existing authorized artifact archive routes. Studio shows the compact result first, loads evidence/workload previews when Results is opened, and loads metric-series detail files when Metrics is opened. No artifact request is made on the initial Job Details load. Archive availability is independent from execution outcome; `PENDING`, `ARCHIVING`, `READY`, `FAILED` or omitted details do not change terminal status or exit code. ERROR and INVALID keep their real runtime/preparation/validation cause ahead of Worker/Journal truncation and archive diagnostics.
 
 Each metrics snapshot includes `metrics.accounting`. It reconciles scheduled arrivals with started and dropped arrivals, started iterations with completed and unresolved iterations, and completed outcomes with PASS, SUT failure, runtime error, and explicit other outcome counts such as `SKIPPED`. The accounting state is `IN_PROGRESS`, `VERIFIED`, `PARTIAL` or `FAILED`; final partial or failed accounting makes execution `ERROR` and adds a bounded diagnostic. Multi-workload summaries also verify that aggregate counters equal the sum of the workload counters. Phase counters are checked at the same snapshot boundary.
 
@@ -215,7 +213,7 @@ For long scenarios, the Engine performs a read-only preflight and records `resou
 
 Load v1.9 adds event-time windows named `all`, `measured` and `steady`. `measured` starts after ramp-up and warm-up and includes steady and ramp-down; `steady` covers only the configured steady duration. The HTML report opens on `steady` and lets readers select another window. Scheduled, started and completed rates use the timestamp of each event and the configured window duration. `startedRate` therefore remains event-time. `admissionRate` instead uses the same scheduled cohort: arrivals scheduled in the window that start by run finish divided by all arrivals scheduled in that window; arrivals still unstarted at finish count as not admitted. Latency percentiles and outcome counts use the scheduled cohort, so a drained iteration remains attributed to the phase where it was scheduled. Existing top-level metric names remain available; measured aggregates include scheduled STEADY and RAMP_DOWN work only.
 
-Nested `thresholds.steady` and `thresholds.overall` evaluate against the steady and all-execution windows. Top-level measured thresholds use the corrected measured interval, `STEADY + RAMP_DOWN`; ramp-up and warm-up are excluded. An incomplete or unevaluable window returns `NOT_EVALUATED`; it is not a performance pass. Reports show execution status separately from the performance verdict and disclose the percentile sample and observation counts so sparse estimates are visible. Direct Engine/CLI summaries use legacy summary contract (schema under `schemas/history/`); archived reports use the additive `att-load-summary/v1.3` schema with optional detail-manifest and workload-sidecar references.
+Nested `thresholds.steady` and `thresholds.overall` evaluate against the steady and all-execution windows. Top-level measured thresholds use the corrected measured interval, `STEADY + RAMP_DOWN`; ramp-up and warm-up are excluded. An incomplete or unevaluable window returns `NOT_EVALUATED`; it is not a performance pass. Reports show execution status separately from the performance verdict and disclose the percentile sample and observation counts so sparse estimates are visible. Direct Engine/CLI summaries use existing Engine/CLI summary contract; archived reports use the additive `att-load-summary/v1.3` schema with optional detail-manifest and workload-detail file references.
 
 ### SUT threshold acceptance
 
@@ -275,9 +273,9 @@ Use `outputs` when one query or Package Tool invocation returns several numeric 
 
 The result path defaults to `rows`. It may select a bounded object/list path such as `payload.rows`. Without `workloadColumn`, the result must contain exactly one row for a Job-wide binding. With `workloadColumn` and no `mixColumn`, each row maps to Workload scope, including for a mixed Workload. If the query returns an aggregate across mix slots, define that aggregation in the query or Tool; ATT keeps the result at Workload scope and does not copy it to individual slots. There must be at most one row per Workload. Add `mixColumn` to identify a mix slot by the pair `workloadId` and `mixId`; it requires `workloadColumn`. A row with a missing or unknown mix ID remains unassociated and is reported in mapping diagnostics, while independently mapped slots remain available. ATT does not use target IDs, dynamic pivots, fuzzy joins, or implicit aggregation to associate rows. Column lookup is exact and case-sensitive, so configured column names must match the labels returned by the query or Tool.
 
-Each call group supports up to 64 outputs and 4,096 result rows. The Job supports at most 16 actual calls, with a 60-second per-call limit and a 120-second total call budget. ATT keeps returned rows in memory only; sidecars and reports store each numeric output and mapping diagnostics, not the raw rows. An invalid output column affects that metric and subject only. A failed or timed-out call makes every output in its group unavailable. Duplicate, unknown, missing, and ambiguous rows remain visible as diagnostics, and every expected Workload/mix output remains present. Partial or unavailable values are never replaced with zero.
+Each call group supports up to 64 outputs and 4,096 result rows. The Job supports at most 16 actual calls, with a 60-second per-call limit and a 120-second total call budget. ATT keeps returned rows in memory only; detail files and reports store each numeric output and mapping diagnostics, not the raw rows. An invalid output column affects that metric and subject only. A failed or timed-out call makes every output in its group unavailable. Duplicate, unknown, missing, and ambiguous rows remain visible as diagnostics, and every expected Workload/mix output remains present. Partial or unavailable values are never replaced with zero.
 
-Set `sampling: windowQuery` and `window: steady` to make one post-drain call with the actual STEADY bounds available as `EXEC.OBSERVATION.WINDOW_START` and `EXEC.OBSERVATION.WINDOW_END`. The query author defines the aggregation; a returned value does not prove exhaustive coverage. A single-output map or list result requires an explicit `valuePath` such as `rows[0].active`, and the resolved value must be one finite number. The Server pins the Package and Runtime Config revisions at Job admission. It does not retain executable source for delayed execution; if either revision changes before collection, the sidecar is `NOT_EVALUATED` and Job diagnostics report `BUSINESS_CALL_PACKAGE_CHANGED` or `BUSINESS_CALL_CONFIG_CHANGED`. ATT never silently runs the call against changed files. Calls run in a bounded Server worker pool, outside LOAD workers. After-drain values are fresh only when collected within two minutes of LOAD completion, independent of the Prometheus after buffer; later values are stale. In mixed Jobs, after-drain calls start promptly after LOAD finishes. Verified business sidecars are exposed as provisional, read-only evidence while the combined manifest remains `PENDING`, with `business: COMPLETE`, `prometheus: PENDING`, and the Prometheus `eligibleAt` deadline. Threshold and combined performance verdicts remain pending until the full collection is terminal; polling backs off toward that deadline. Restart recovery resumes the unfinished Prometheus phase without repeating a completed Business phase. A restart during an in-progress Business call fails closed with `SERVER_RESTART_INTERRUPTED` and does not retry a possibly side-effecting call. A failed, timed-out, stale, or non-numeric call evaluates to `NOT_EVALUATED`; it is never substituted with zero and does not change the Worker result. Binding validation and live preview never execute a business call.
+Set `sampling: windowQuery` and `window: steady` to make one post-drain call with the actual STEADY bounds available as `EXEC.OBSERVATION.WINDOW_START` and `EXEC.OBSERVATION.WINDOW_END`. The query author defines the aggregation; a returned value does not prove exhaustive coverage. A single-output map or list result requires an explicit `valuePath` such as `rows[0].active`, and the resolved value must be one finite number. The Server pins the Package and Runtime Config revisions at Job admission. It does not retain executable source for delayed execution; if either revision changes before collection, the detail file is `NOT_EVALUATED` and Job diagnostics report `BUSINESS_CALL_PACKAGE_CHANGED` or `BUSINESS_CALL_CONFIG_CHANGED`. ATT never silently runs the call against changed files. Calls run in a bounded Server worker pool, outside LOAD workers. After-drain values are fresh only when collected within two minutes of LOAD completion, independent of the Prometheus after buffer; later values are stale. In mixed Jobs, after-drain calls start promptly after LOAD finishes. Verified business detail files are exposed as provisional, read-only evidence while the combined manifest remains `PENDING`, with `business: COMPLETE`, `prometheus: PENDING`, and the Prometheus `eligibleAt` deadline. Threshold and combined performance verdicts remain pending until the full collection is terminal; polling backs off toward that deadline. Restart recovery resumes the unfinished Prometheus phase without repeating a completed Business phase. A restart during an in-progress Business call fails closed with `SERVER_RESTART_INTERRUPTED` and does not retry a possibly side-effecting call. A failed, timed-out, stale, or non-numeric call evaluates to `NOT_EVALUATED`; it is never substituted with zero and does not change the Worker result. Binding validation and live preview never execute a business call.
 
 Business metrics support `max <= value` thresholds, including numeric counters. Use `window: afterDrain` for an `afterDrain` metric or `window: steady` for a `windowQuery` metric. These single-value rules do not use `minimumCoverage`. Omit `subjects` or set it to `all` to evaluate every expected subject. For an exact Workload or mix selection, provide `subjects` as a list; a mix selector must include both immutable IDs:
 
@@ -304,7 +302,7 @@ The summary separates generator observations from SUT outcomes. `metrics.generat
 
 The full-execution series at `metrics.windowMetrics.timeSeries.points` stores up to 2,048 populated time bins, initially 1,000 ms wide. When the populated-bin count exceeds that capacity, ATT merges adjacent bins and doubles the bucket width using power-of-two coarsening. It does not evict historical bins, so longer runs retain their history at lower time resolution. The measured and steady series at `metrics.windowMetrics.timeSeries.windowSeries.measured.points` and `metrics.windowMetrics.timeSeries.windowSeries.steady.points` have separate 2,048-bin bounds. They align bins to their configured window start, start with the smaller of 1,000 ms or the window duration, and clip a final partial bucket at the window boundary; they use the same coarsening and no-eviction policy. The compatibility `metrics.buckets` series is separate: it keeps the newest 4,096 one-second buckets in a circular buffer and evicts older entries. ATT does not average per-workload percentiles to calculate the overall percentile.
 
-The Load telemetry fields remain optional in the direct legacy summary contract (schema under `schemas/history/`); archived reports use `att-load-summary/v1.3` and sidecar references. Server Job Results use the separate, versioned `att-load-terminal-result/v1` contract. Consumers that need full metrics should follow `detailManifestPath` and its relative chunk references after the archive reports READY.
+The Load telemetry fields remain optional in the direct existing Engine/CLI summary contract; archived reports use `att-load-summary/v1.3` and detail file references. Server Job Results use the separate, versioned `att-load-terminal-result/v1` contract. Consumers that need full metrics should follow `detailManifestPath` and its relative chunk references after the archive reports READY.
 
 For sampling limits and maintainer verification, see [Load Generator Telemetry](../../system-design/load-telemetry.md) and [Compact LOAD terminal result](../../system-design/load-terminal-result.md). The deterministic short-versus-synthetic-long transfer benchmark runs with `mvn -q -o -pl att-server -am -Dtest=ServerRuntimeLoadTerminalResultTest#benchmarkShortAndSyntheticLongMultiWorkloadTransferSizes -Datt.skipFrontendUnitTests=true -Dsurefire.failIfNoSpecifiedTests=false test`; it constructs a 30–60-minute-equivalent multi-workload result and does not run a long LOAD.
 
@@ -322,15 +320,15 @@ Each iteration evaluates Context references, built-in calls, and external calls 
 
 With `--profile`, `performance.json` records `renderPlansCompiled`, `renderPlanCacheHits`, `renderPayloadResolutions`, `renderPayloadResolutionCacheHits`, `renderEvaluations`, `renderArtifactWrites`, and `renderSourceBytes`. See [Load scheduler design](../../system-design/load-scheduler.md) for how Load prepares plans and reuses immutable source data across iterations.
 
-Load startup also compiles the selected Template/Flow action sequence, primary Tool calls and argument expressions, `runWhen`, assertions, and `retry.when`. Each iteration evaluates that immutable plan against its own Context. Testdata input mappings are likewise compiled during target validation; descriptors and effective workload policies are prepared once, while record selection and Context values remain iteration-specific. The run summary's `resources.execution` contains `executionPlansCompiled`, `actionPlansCompiled`, and `actionEvaluations`.
+Load startup also compiles the selected Flow action sequence, primary Tool calls and argument expressions, `runWhen`, assertions, and `retry.when`. Each iteration evaluates that immutable plan against its own Context. Testdata input mappings are likewise compiled during target validation; descriptors and effective workload policies are prepared once, while record selection and Context values remain iteration-specific. The run summary's `resources.execution` contains `executionPlansCompiled`, `actionPlansCompiled`, and `actionEvaluations`.
 
 ## Override workload settings from the CLI
 
 For one workload, options such as --users, --arrival-rate, --ramp-up, --warmup, --duration, --ramp-down, --think-time and --max-concurrent can override matching YAML values. Unscoped load-model overrides fail for multi-workload scenarios.
 
-Repeatable `--set` accepts `input.path=value`, Tool-only `arg.name=value`, or Template/Flow-only `vars.path=value`. Values use safe YAML parsing and remain typed; nested maps and numeric list indexes are supported where practical, for example `input.customer.ids[0]=42`. Duplicate assignments apply in order (last wins). ATT expressions are not evaluated during option parsing. Unqualified overrides are rejected for multi-workload scenarios.
+Repeatable `--set` accepts `input.path=value`, Tool-only `arg.name=value`, or Flow-only `vars.path=value`. Values use safe YAML parsing and remain typed; nested maps and numeric list indexes are supported where practical, for example `input.customer.ids[0]=42`. Duplicate assignments apply in order (last wins). ATT expressions are not evaluated during option parsing. Unqualified overrides are rejected for multi-workload scenarios.
 
-`load/load.yaml` is an optional current `att-load/v1.9` policy-only descriptor with no target, inputs or Tool arguments. It contains the default `load` policy and may also declare `execution`, `thresholds`, `evidence`, `seed` and Load-local `testdata` imports. Explicit CLI pacing values override the policy. `load --debug template|flow|tool <id>` promotes the selected sidecar's `inputs`, `vars` or Tool `arguments` into a transient single-workload scenario and then uses the regular Load validation, scheduler and evidence pipeline; Debug execution is not run first. With no policy, provide a complete CLI policy such as `--users 2 --duration 10s` (arrival-rate also requires `--max-concurrent` and `--overload-policy`).
+`load/load.yaml` is an optional current `att-load/v1.9` policy-only descriptor with no target, inputs or Tool arguments. It contains the default `load` policy and may also declare `execution`, `thresholds`, `evidence`, `seed` and Load-local `testdata` imports. Explicit CLI pacing values override the policy. `load --debug flow|tool <id>` promotes the selected detail file's `inputs`, `vars` or Tool `arguments` into a transient single-workload scenario and then uses the regular Load validation, scheduler and evidence pipeline; Debug execution is not run first. With no policy, provide a complete CLI policy such as `--users 2 --duration 10s` (arrival-rate also requires `--max-concurrent` and `--overload-policy`).
 
 Example policy descriptor (copy to `load/load.yaml`):
 
@@ -342,28 +340,22 @@ evidence: {mode: failures}
 ~~~
 
 ~~~sh
-./att.sh load ../examples/load/closed-smoke.yaml
-./att.sh load ../examples/load/arrival-smoke.yaml --format json
-./att.sh load ../examples/load/multi-closed.yaml
-./att.sh load ../examples/load/multi-arrival.yaml
-./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
+./att.sh load ../../examples/load/closed-smoke.yaml
+./att.sh load ../../examples/load/arrival-smoke.yaml --format json
+./att.sh load ../../examples/load/multi-closed.yaml
+./att.sh load ../../examples/load/multi-arrival.yaml
+./att.sh debug flow common.payment.v1 --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh debug
 ./att.sh load
 ./att.sh load --debug tool fpp.invokeApi --set arg.requestId=42
 ~~~
 
-Copyable examples and field descriptions are maintained in [examples/load/README.md](../../../examples/load/README.md). Schema migration is documented in [Migration Notes](../appendices/migrations.md).
+Copyable examples and field descriptions are maintained in [examples/load/README.md](../../../examples/load/README.md). Migration details are maintained in the [Legacy migration reference](../../legacy/migration-reference.md).
 
-## Check execution ID fields before use
+See the [Legacy documentation](../../legacy/README.md) for earlier Load field migration notes.
 
-ATT allocates one engine-managed `EXEC.ID` per started iteration: `<runId>-execution-<sequence>`. One run-scoped, thread-safe monotonic allocator serves every workload, target, mix entry and phase. The ID is published before bootstrap variables and target actions. `EXEC.RUN_ID` remains the enclosing Run identity. Collision tracking uses no per-iteration files or growing identity registry.
-
-`execution.execIdFormat` is rejected in current and historical Load Scenarios, policy-only files, inline drafts and saved Schedule/Worker snapshots, including an empty value. Remove the field and migrate to `att-load/v1.9`; review artifact-path consumers and store business correlation in a separate input/variable. Existing artifacts keep their original paths. Historical schema files remain available for inspection; historical resources without customization normalize to the current contract. Replace affected immutable schedules through the normal reviewed-draft workflow.
-
-Generated identities retain the existing safe-segment grammar and 240-character limit. The existing Run ID contract (including Unicode and interior spaces) is unchanged. Run IDs outside the ASCII execution-segment grammar use `run-<SHA-256 of UTF-8 Run ID>` as their execution prefix; ASCII-safe Run IDs keep their literal prefix. The enclosing Run directory and `EXEC.RUN_ID` retain the original value. Encoding is computed once per run; every prefix leaves room for `-execution-` plus a signed-long sequence. Exhaustion fails permanently without wrapping. Every Run output namespace is claimed atomically once using `.execution-owner`. A second owner or restart must choose a fresh outer Run ID. Claims remain until safe completed-Job artifact retention removes the Run directory. Old reservation directories must only be removed by safe completed-Job retention; never delete markers while an old process can still use them. Metrics-only evidence remains lazy: this single Run metadata file does not materialize per-iteration workspaces.
-
-Outer `execution.runIdFormat`, `execution.debugIdFormat`, exact `--run-id` and `--debug-id` behavior is unchanged. Diagnostic iteration/VU/Workload/mix IDs and scheduler event sequences remain separate from `EXEC.ID`. Independent distributed Workers must use disjoint namespaces or a shared allocator; separate process-local counters cannot safely share a Run namespace.
+The current `att-load/v1.9` contract rejects `execution.execIdFormat`; see the [Legacy migration reference](../../legacy/migration-reference.md) for earlier configuration migration details.
 
 ## Error rates and failure diagnosis (4.2.4)
 
@@ -381,13 +373,13 @@ Optional `runtimeErrorRate` and `totalErrorRate` thresholds use the same percent
 
 The Runtime failures / Failure diagnosis section shows total/measured runtime counters and at most 100 sanitized lightweight failure samples per aggregate, workload or mix collector. Each sample identifies iteration, sequence, phase, timestamp, workload/mix, outcome, classification, diagnostic source/code/summary and evidence state. Counts stay complete after sample limits are reached. When no samples are available, the report says `No lightweight failure samples were recorded.` Scheduler exceptions are distinguished from returned executor failures; public samples omit stack traces, classified secrets and host paths. Retained Case Logs are linked in the Evidence section. `NO_CASE_LOG`, `WORKSPACE_MISSING`, `EVIDENCE_IO_ERROR`, `EVIDENCE_MATERIALIZATION_ERROR` and `NOT_RETAINED_BY_POLICY` explain missing evidence independently of the iteration outcome. An evidence failure is not another failed iteration.
 
-## Target-agnostic Load Templates
+## Load presets
 
-Load testing opens **Templates** by default. All six modes use `att-load-template/v1`: `single-vu`, `single-tps`, `single-workload-mix`, `multi-vu`, `multi-tps`, and `multi-workload-mix`. Single VU/TPS reuse Quick Load. Mixed modes use independent weighted iteration selection within each workload; VU pools are never divided by mix weights. Multiple TPS workloads request arrivals independently and report drops and achieved throughput separately. All workloads share the same phase timing envelope.
+Load testing opens preset resources by default. All six modes use `att-load-template/v1`: `single-vu`, `single-tps`, `single-workload-mix`, `multi-vu`, `multi-tps`, and `multi-workload-mix`. Single VU/TPS reuse Quick Load. Mixed modes use independent weighted iteration selection within each workload; VU pools are never divided by mix weights. Multiple TPS workloads request arrivals independently and report drops and achieved throughput separately. All workloads share the same phase timing envelope.
 
-The **Scenarios** tab retains executable YAML and **Legacy Quick Load Policy** profiles. It excludes `load/templates/` and `load/bindings/`. **View LOAD Jobs** opens Jobs and results with an authorized Server-side LOAD filter and pagination; the filter survives details and browser navigation.
+The **Scenarios** tab retains executable YAML and saved Quick Load policies. It excludes `load/templates/` and `load/bindings/`. **View LOAD Jobs** opens Jobs and results with an authorized Server-side LOAD filter and pagination; the filter survives details and browser navigation.
 
-Built-ins use `builtin:<mode>`. Put package templates in `load/templates/` and bindings in `load/bindings/`. Files must be package-relative, schema-valid, at most 256 KiB, and within the bounded catalog scan. Templates contain structural/pacing defaults only, never target IDs or business values. A template cannot execute until every slot is bound. For example:
+Built-ins use `builtin:<mode>`. Put package presets in `load/templates/` and bindings in `load/bindings/`. Files must be package-relative, schema-valid, at most 256 KiB, and within the bounded catalog scan. Presets contain structural/pacing defaults only, never target IDs or business values. A preset cannot execute until every slot is bound. For example:
 
 Catalog inspection pages contain at most 100 items and also honor the configured serialized response budget (256 KiB by default). Follow `nextOffset` until it is null: each page retains complete definitions, so the same query and offset retrieve the corresponding definitions without a separate detail call. A definition that cannot fit even alone is listed as `response-too-large` without its definition; reduce its size for Studio, or compose it directly by file reference in the CLI. CLI `load --list-templates` follows every page automatically and retains the scan-limit `truncated` indicator.
 
@@ -413,7 +405,7 @@ schemaVersion: att-load-bindings/v1
 bindings:
   workload-a:
     mix:
-      browse: {type: template, id: BROWSE}
+      browse: {type: flow, id: common.payment.v1}
       purchase: {type: flow, id: PURCHASE}
   workload-b:
     mix:
@@ -423,17 +415,17 @@ bindings:
 
 This creates two workloads, four bindings, three unique targets and 30 VU. Workload and mix slot IDs remain stable when targets repeat or rows move. Fixed modes use `bindings.<workloadId>.target`. Extra workload/mix bindings require an explicit `prototype` naming an existing slot in that scope; they copy its policy, not its target. Missing required slots, unknown prototypes, duplicate IDs and incompatible models fail before traffic. The descriptor limit is 128 workloads/entries; Server aggregate limits may be lower.
 
-The builder summarizes bindings, users/rates and weights. Detailed workload, mix, target and common settings use Save/Cancel dialogs; Cancel or Escape discards tentative changes. Target inputs/vars/Tool arguments retain safe typed sidecar defaults independently for each target. Precedence is template policy, then safe target sidecar business defaults, then target binding values, then workload binding inputs/vars; applicable explicit CLI overrides win. Business maps merge by key, preserving distinct keys and letting the later layer win conflicts. Studio preserves workload-specific timing, ramps and execution settings, including ranged think time, through validation and edits. Debug-local testdata imports are rejected: declare supported Load testdata sources explicitly. Bindings may specify workload inputs, vars and testdata selection as well as target-specific values.
+The builder summarizes bindings, users/rates and weights. Detailed workload, mix, target and common settings use Save/Cancel dialogs; Cancel or Escape discards tentative changes. Target inputs/vars/Tool arguments retain safe typed detail file defaults independently for each target. Precedence is preset policy, then safe target detail file business defaults, then target binding values, then workload binding inputs/vars; applicable explicit CLI overrides win. Business maps merge by key, preserving distinct keys and letting the later layer win conflicts. Studio preserves workload-specific timing, ramps and execution settings, including ranged think time, through validation and edits. Debug-local testdata imports are rejected: declare supported Load testdata sources explicitly. Bindings may specify workload inputs, vars and testdata selection as well as target-specific values.
 
 Validate creates a full `att-load/v1.9` immutable draft through the shared Engine composer. Review shows redacted Server-normalized YAML. Any saved edit or environment change invalidates validation; source/revision changes are checked again at submission. Run requires traffic confirmation; Schedule uses the same validated draft and normal permissions, limits, expiry and revision policy. No browser storage or package source writes are used.
 
-**Configure & Rerun** from a LOAD Job uses this standard editor with a server-issued `draftRef`. It prefills the safe retained scenario, environment, workload IDs/mix, model, pacing, timing phases, thresholds, evidence and eligible inputs. Edit the common timing envelope and model-specific fields, then validate against the current Package before reviewing the delta. Current-package rerun does not silently reload latest YAML defaults or convert Arrival Rate to Virtual Users. File-backed LOAD replay remains on its package-relative source route and does not inherit inline-draft-only duration caps; see [Job replay](unified-run.md#replay-and-new-execution-from-a-job).
+**Configure & Rerun** from a LOAD Job uses this standard editor with a server-issued `draftRef`. It prefills the safe retained scenario, environment, workload IDs/mix, model, pacing, timing phases, thresholds, evidence and eligible inputs. Edit the common timing envelope and model-specific fields, then validate against the current Package before reviewing the delta. Current-package rerun does not silently reload latest YAML defaults or convert Arrival Rate to Virtual Users. File-backed LOAD replay remains on its package-relative source route and does not inherit inline-draft-only duration caps; see [Job replay](unified-run.md#replay-or-configure-a-new-execution).
 
 ```bash
 ./att.sh load --list-templates --format json
-./att.sh load --debug template BROWSE --load-template builtin:single-vu --preview
+./att.sh load --debug flow common.payment.v1 --load-template builtin:single-vu --preview
 ./att.sh load --debug --load-template load/templates/mixed.yaml --bindings load/bindings/mixed.yaml --env SIT --preview --format json
 # Remove --preview only after reviewing the composed scenario.
 ```
 
-Use the same arguments with `att.bat` on Windows. List and preview are read-only and start no traffic. `--preview` requires a template; JSON output remains machine-readable. Multi-target mode requires a complete binding descriptor and rejects unscoped `--input`, `--set`, `--users`, `--arrival-rate`, `--think-time`, `--max-concurrent` and `--overload-policy`. Common duration/warmup/ramp timing overrides apply to the shared envelope. Existing no-template `load --debug <type> <id>` and no-argument scenario discovery retain their behavior. Validation errors exit nonzero with field context.
+Use the same arguments with `att.bat` on Windows. List and preview are read-only and start no traffic. `--preview` requires a preset; JSON output remains machine-readable. Multi-target mode requires a complete binding descriptor and rejects unscoped `--input`, `--set`, `--users`, `--arrival-rate`, `--think-time`, `--max-concurrent` and `--overload-policy`. Common duration/warmup/ramp timing overrides apply to the shared envelope. Existing no-preset `load --debug <type> <id>` and no-argument scenario discovery retain their behavior. Validation errors exit nonzero with field context.

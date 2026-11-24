@@ -1,0 +1,8 @@
+schemaVersion: att-flow/v3.6
+id: common.identity.v1
+name: Execution Identity
+description: Prefer the source Case ID when available, with the execution ID as a cross-mode fallback.
+actions:
+  identityValue:
+    type: tool
+    call: "#{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}"

@@ -615,9 +615,9 @@ public final class DebugEngine {
     private ResolvedTarget resolveTarget(String type, String id, DebugInput input) throws Exception {
         if ("template".equals(type)) {
             StageTemplate template = new StageTemplateLoader(projectRoot, config.templatesRoot(), false).loadSelected(id);
-            return new ResolvedTarget(template, new FlowRegistry(projectRoot, config.templatesRoot(), false));
+            return new ResolvedTarget(template, new FlowRegistry(projectRoot, config, false));
         }
-        FlowRegistry flows = new FlowRegistry(projectRoot, config.templatesRoot(), false);
+        FlowRegistry flows = new FlowRegistry(projectRoot, config, false);
         if ("flow".equals(type)) {
             FlowDefinition flow = flows.get(id);
             if (flow == null) throw debugError("Unknown Flow '" + id + "'", "Define the Flow below templates/flows and use its canonical .vN id.");
@@ -813,7 +813,7 @@ public final class DebugEngine {
             return template.directory().resolve("debug.yaml");
         }
         if ("flow".equals(type)) {
-            FlowDefinition flow = new FlowRegistry(projectRoot, config.templatesRoot(), false).get(id);
+            FlowDefinition flow = new FlowRegistry(projectRoot, config, false).get(id);
             if (flow == null) throw debugError("Unknown Flow '" + id + "'", "Define the Flow before creating its debug.yaml sidecar.");
             return flow.directory().resolve("debug.yaml");
         }

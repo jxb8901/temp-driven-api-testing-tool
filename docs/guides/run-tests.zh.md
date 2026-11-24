@@ -1,36 +1,25 @@
 # 執行 functional test
 
-本指南示範舊版 workbook／Sidecar／Snapshot 相容路徑，並使用 `./att.sh run` 執行已提交的 offline Case。尚未發佈的 4.6.0 release-target stack 中的 Native Case command，請參閱[快速入門](../quick-start.zh.md)及[目前 CLI Reference](../reference.zh/cli.md)。
+本指南示範[快速入門](../quick-start.zh.md)所述的 Native Case 流程。從 repository root 執行 `./att.sh` 可使用 default Package；亦可用 `--package` 選取另一個已登記的 Package。
 
-## 1. 編譯 source checkout
+## 編譯 source checkout
 
-~~~sh
-mvn -DskipTests -pl att-cli -am compile
-~~~
+```sh
+./build.sh
+```
 
-Packaged installation 已包含 application JAR。
+Build 會建立 runtime distribution，並準備本地 CLI。
 
-## 2. 產生並驗證 authored input
+## 驗證 Native input
 
-從 repository root 執行時，launcher 會選擇 default Package。
-
-~~~sh
-./att.sh snapshot --suite testcase/quick_start.xlsx
+```sh
 ./att.sh validate --package
-~~~
+```
 
-Snapshot generation 會寫入 workbook 的 canonical representation。Validation 檢查目前 configuration 和 Package input，不會呼叫 business Tool 或建立 Snapshot。
+Validation 會檢查 Native Definition 及其所選的 Flow/Tool dependency，不會提交 Server Job 或啟動 LOAD scheduler。
 
-## 3. 執行 Case
+## 執行所選 Case
 
-~~~sh
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
-~~~
+使用 `run native-case` 選擇一個 Definition/Case，或使用 `run native-suite` 執行 implicit Suite。完整 command 和預期結果見[快速入門](../quick-start.zh.md)。RUN 會先驗證 selection，再把 evidence 寫入新的 run directory。
 
-請依據結果摘要中的 Local Run ID 和 output directory 尋找執行 evidence。Template、Flow 或 Tool diagnostics 使用目前相容 command standalone Debug：
-
-~~~sh
-./att.sh debug template PAYMENT_INVOKE
-~~~
-
-Target 與 selection semantics 請參閱 [Unified RUN](../reference.zh/execution-modes/unified-run.md)。Local CLI vNext 語法[預計於未來版本推出](../interfaces/cli/vnext-proposed.zh.md)。
+維護以較早模型編寫的 Package，請使用[舊版 execution guide](../legacy/execution.zh.md)。

@@ -1,21 +1,19 @@
 # Execution model
 
-ATT 將 functional execution、Load generation 及 read-only validation 分開。
+ATT 將 functional RUN、LOAD traffic generation 和唯讀 VALIDATE 分開處理。
 
 ## Functional RUN
 
-執行模型支援 Case、Template、Flow 或 Tool target，亦支援選取一批 Case。ATT Studio 及 Server 透過統一的 RUN draft 與 Job 提供這些功能。對支援的 Server target，Debug 是 RUN 的選用診斷模式。
-
-舊版 Local CLI 的 `./att.sh run` command 會執行 workbook Case，standalone `debug` 則執行單一 Template、Flow 或 Tool。4.6.0 release-target CLI 加入由 Native resolution 支援的明確 `run native-case` 和 `run native-suite` command；release 和 tag 尚未發佈，部署驗收仍待完成。舊版 ATT Remote client 保留其 Server command。Command 名稱不會定義不同的 Engine semantics。
+Native RUN 會把 Test Case Definition 解析成所選 Resolved Case。每個 Case 使用其綁定的 Flow、typed input 和已宣告 Resource。Server 和 Studio 會提交已驗證的 RUN draft；draft 會凍結 Package revision 和 selection。Debug 會用明確 inputs 執行一個 Flow 或 Tool。
 
 ## LOAD
 
-LOAD 透過 Load scheduler 執行 workload definition，支援 VU 或 arrival-rate pacing、timing controls、threshold 及 evidence policy。這是獨立的效能執行模型。六種 authoring shape 概述於 [Load model](load-model.zh.md)；[Load Reference](../reference.zh/execution-modes/load.md) 定義其 schema 及 execution contract。
+LOAD 透過 scheduler 執行 Flow 或 Tool workload，支援 virtual-user 或 arrival-rate pacing、timing control、threshold 和 evidence policy。Native Case LOAD target 仍在延後範圍。詳見[Load model](load-model.zh.md)和 [Load Reference](../reference.zh/execution-modes/load.md)。
 
 ## VALIDATE
 
-VALIDATE 檢查 configuration、Package resource、schema 及所選 dependencies。就 business execution 而言，它是 read-only：不會執行 Tool、發送 Load traffic 或進行 DB/MQ business operation。Snapshot generation 仍是明確的 authoring command。
+VALIDATE 會檢查 Configuration、Package resource、schema 和所選 dependency。它不會執行 Tool、發送 LOAD traffic 或進行 DB/MQ business operation，也不會建立或更新 authored input。
 
-## Contract 所有權
+## 契約來源
 
-[Unified RUN](../reference.zh/execution-modes/unified-run.md) 定義 RUN semantics。[Debug](../reference.zh/execution-modes/debug.md) 定義診斷 input 與 output。[LOAD](../reference.zh/execution-modes/load.md) 定義 workload 行為。[Validation and Diagnostics](../reference.zh/validation-diagnostics.md) 定義 validation result 與診斷。
+[RUN](../reference.zh/execution-modes/run.md) 定義 Case selection 和執行。[Debug](../reference.zh/execution-modes/debug.md) 定義診斷 input 和 output。[LOAD](../reference.zh/execution-modes/load.md) 定義 workload 行為。[Validation 和 Troubleshooting](../reference.zh/validation-diagnostics.md) 定義驗證結果和 diagnostic。維護以較早模型編寫的 Package，請使用[舊版文件](../legacy/README.zh.md)。

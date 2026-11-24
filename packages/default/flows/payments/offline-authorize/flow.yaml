@@ -1,0 +1,23 @@
+schemaVersion: att-flow/v3.6
+id: payments.offline.authorize.v1
+name: Offline payment authorization
+description: Deterministic offline authorization. Amounts above the limit are business rejections. No network, database, or MQ.
+
+actions:
+  decide:
+    type: assign
+    description: Accept at or under the limit; reject above it.
+    name: decision
+    expression: "#{misc.iif(${EXEC.INPUT.amount} > ${EXEC.INPUT.limit}, 'REJECTED', 'ACCEPTED')}"
+
+  show:
+    type: log
+    description: Record the offline authorization decision.
+    message: "authorize #{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}: decision=${EXEC.VARS.decision}"
+
+  verify:
+    type: assert
+    description: The Case passes when the decision matches the expected business outcome.
+    assert: "#{${EXEC.VARS.decision} == ${EXEC.INPUT.expectedDecision}}"
+    expected: "${EXEC.INPUT.expectedDecision}"
+    actual: "${EXEC.VARS.decision}"

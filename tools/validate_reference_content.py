@@ -9,8 +9,8 @@ MANIFEST = DOCS / "reference-manifest.txt"
 
 REQUIRED = {
     "runtime-context.md": ["EXEC.INPUT", "EXEC.VARS", "EXEC.ACTIONS", "EXEC.LOAD", "META", "EXEC.ACTIONS.<id>.output", "META.HTTPHELPER"],
-    "execution-modes/run.md": ["run", "Testcase", "Stage", "latest-run.yaml", "exit"],
-    "execution-modes/debug.md": ["att-debug/v1.2", "vars", "EXEC.VARS", "template", "flow", "tool", "debug.yaml", "--input", "--env", "output/debug", "exit"],
+    "execution-modes/run.md": ["run", "Resolved Case", "latest-run.yaml", "exit"],
+    "execution-modes/debug.md": ["att-debug/v1.2", "vars", "EXEC.VARS", "Flow", "Tool", "--input", "--env", "output/debug", "exit"],
     "execution-modes/load.md": ["att-load/v1.9", "testdata", "scope", "selection", "users", "arrivalRate", "maxConcurrent", "overloadPolicy", "EXEC.LOAD", "execIdFormat", "load-summary", "failures/<EXEC.ID>"],
     "resources/tools.md": ["command-backed", "call-backed", "output.result", "stdoutFormat", "evidence"],
     "resources/dbhelper.md": ["att-dbhelper/v2.6", "query", "update", "transaction", "JDBC", "evidence"],
@@ -128,11 +128,27 @@ def main():
                 if old in text:
                     fail(errors, "%s still contains migrated material: %s" %
                          (authoring.relative_to(ROOT), old))
-            required_sections = ("Workbook", "Stage", "Template", "Flow", "Authoring lifecycle")
+            required_sections = ("Flow", "Authoring lifecycle")
             if any(not re.search(r"(?m)^##\s+" + re.escape(section) + r"\s*$", text)
                    for section in required_sections):
-                fail(errors, "%s must expose Workbook, Stage, Template, Flow and authoring lifecycle peer sections" %
+                fail(errors, "%s must expose Native Flow and authoring lifecycle sections" %
                      authoring.relative_to(ROOT))
+
+    for lang in ("", ".zh"):
+        authoring = DOCS / "legacy" / ("authoring" + lang + ".md")
+        execution = DOCS / "legacy" / ("execution" + lang + ".md")
+        if not authoring.is_file() or not execution.is_file():
+            continue
+        authoring_text = authoring.read_text(encoding="utf-8").casefold()
+        for token in ("workbook", "sidecar", "snapshot", "stage", "template"):
+            if token not in authoring_text:
+                fail(errors, "%s missing moved authoring coverage: %s" %
+                     (authoring.relative_to(ROOT), token))
+        execution_text = execution.read_text(encoding="utf-8").casefold()
+        for token in ("testcase", "stage", "latest-run.yaml", "debug", "load"):
+            if token not in execution_text:
+                fail(errors, "%s missing moved execution coverage: %s" %
+                     (execution.relative_to(ROOT), token))
 
     en_ops = DOCS / "reference" / "ci-packaging-operations.md"
     if en_ops.is_file() and "Architecture for Maintainers" in en_ops.read_text(encoding="utf-8"):

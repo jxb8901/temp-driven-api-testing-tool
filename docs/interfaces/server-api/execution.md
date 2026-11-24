@@ -4,7 +4,7 @@
 
 ## Native Test Case and Suite RUN (att-execution/v2)
 
-This contract is included in the unpublished ATT 4.6.0 formal release target. No 4.6.0 release or tag has been published, and deployed Native RUN acceptance remains open under [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393). Use it only with a Server that advertises `att-execution/v2`. Native inline Test Cases use an explicit `nativeCase` target. `definitionId` identifies a Package Definition under the configured Package Test Case root (default `testcase/`); `resolvedCaseIds` contains one or more unique local Case IDs (up to 1,000). The Server resolves and validates the exact selection in a draft. Do not send Native Case fields to a direct `/jobs/run` request or translate local IDs into legacy Workbook `caseIds`.
+This contract is included in the unpublished ATT 4.6.0 formal release target. No 4.6.0 release or tag has been published. Native RUN acceptance for [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) is closed; that closure is not a published release. Use the contract only with a Server that advertises `att-execution/v2`. Native inline Test Cases use an explicit `nativeCase` target. `definitionId` identifies a Package Definition under the configured Package Test Case root (default `testcase/`); `resolvedCaseIds` contains one or more unique local Case IDs (up to 1,000). The Server resolves and validates the exact selection in a draft. Do not send Native Case fields to a direct `/jobs/run` request or translate local IDs into legacy Workbook `caseIds`.
 
 Create a validated draft:
 

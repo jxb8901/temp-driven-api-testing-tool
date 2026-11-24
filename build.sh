@@ -52,7 +52,7 @@ build_timer_finish() {
   fi
 }
 trap 'build_timer_finish' 0
-for required in pom.xml att-security/pom.xml att-security/src/main/java att-engine/pom.xml att-engine/src/main/java att-cli/pom.xml att-cli/src/main/java att-worker/pom.xml att-worker/src/main/java att-web/pom.xml att-web/frontend/index.html att-server/pom.xml att-dist/pom.xml att-dist/src/assembly/local.xml att-dist/src/assembly/server.xml att-server/src/assembly/server-app.xml att-dist/src/release/local/RELEASE_MANIFEST.txt att-dist/src/release/server/RELEASE_MANIFEST.txt config/config.yaml schemas/catalog.yaml packages/default/templates packages/default/tools packages/default/testcase tools att.sh att.bat README.md CHANGELOG.md docs/server-deployment.md docs/server-deployment.zh.md docs/att-server-web-ui.md docs/att-server-web-ui.zh.md; do
+for required in pom.xml att-security/pom.xml att-security/src/main/java att-engine/pom.xml att-engine/src/main/java att-cli/pom.xml att-cli/src/main/java att-worker/pom.xml att-worker/src/main/java att-web/pom.xml att-web/frontend/index.html att-server/pom.xml att-dist/pom.xml att-dist/src/assembly/local.xml att-dist/src/assembly/server.xml att-server/src/assembly/server-app.xml att-dist/src/release/local/RELEASE_MANIFEST.txt att-dist/src/release/server/RELEASE_MANIFEST.txt config/config.yaml schemas/catalog.yaml packages/default/flows packages/default/tools packages/default/testcase tools att.sh att.bat README.md CHANGELOG.md docs/server-deployment.md docs/server-deployment.zh.md docs/att-server-web-ui.md docs/att-server-web-ui.zh.md; do
   if [ ! -e "$ROOT_DIR/$required" ]; then echo "Missing required package path: $ROOT_DIR/$required" >&2; exit 2; fi
 done
 VERSION="$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' "$ROOT_DIR/pom.xml" | head -n 1)"
@@ -97,7 +97,7 @@ for archive in "$LOCAL_ARCHIVE" "$SERVER_ARCHIVE" "$SOURCE_ARCHIVE"; do
   if [ ! -f "$archive" ]; then echo "Maven distribution assembly did not produce: $archive" >&2; exit 2; fi
 done
 SOURCE_ENTRIES="$(tar -tzf "$SOURCE_ARCHIVE")"
-for required in config/config.yaml schemas/catalog.yaml packages/default/package.yaml packages/default/testcase packages/default/templates packages/default/tools; do
+for required in config/config.yaml schemas/catalog.yaml packages/default/package.yaml packages/default/testcase packages/default/flows packages/default/tools; do
   case "$SOURCE_ENTRIES" in
     *"$SOURCE_PACKAGE_NAME/$required"*) ;;
     *) echo "Source archive is missing required path: $required" >&2; exit 2 ;;
@@ -121,9 +121,46 @@ rm -rf "$ROOT_DIR/target/release"; mkdir -p "$LOCAL_WORK" "$SERVER_WORK" "$DIST_
 tar -xzf "$LOCAL_ARCHIVE" -C "$LOCAL_WORK"
 LOCAL_PACKAGE_DIR="$LOCAL_WORK/$LOCAL_PACKAGE_NAME"
 LOCAL_PACKAGE_ROOT="$LOCAL_PACKAGE_DIR/packages/default"
-for required in att.sh att.bat lib config/att-server.example.yaml config/config.yaml config/dbhelpers config/mqhelpers packages/default/package.yaml packages/default/testcase packages/default/templates packages/default/testdata packages/default/tools; do
+for required in att.sh att.bat lib config/att-server.example.yaml config/config.yaml config/dbhelpers config/mqhelpers packages/default/package.yaml packages/default/testcase packages/default/flows packages/default/testdata packages/default/tools; do
   if [ ! -e "$LOCAL_PACKAGE_DIR/$required" ]; then echo "Local archive is missing required layout path: $required" >&2; exit 2; fi
 done
+for packaged in \
+  packages/default/flows/payments/offline-authorize/flow.yaml \
+  packages/default/flows/payments/offline-settle/flow.yaml \
+  packages/default/testcase/payments/offline-authorize/testcase.yaml \
+  packages/default/testcase/payments/offline-settle/testcase.yaml \
+  packages/default/testdata/payments-offline-settle.xlsx \
+  packages/legacy/package.yaml \
+  packages/legacy/templates/PAYMENT_INVOKE/template.yaml \
+  packages/legacy/templates/V3_FLOW_EXAMPLE/template.yaml \
+  packages/legacy/testcase/payment_regression.xlsx \
+  packages/legacy/testcase/payment2.xlsx \
+  docs/guides/native-payments.md \
+  docs/guides/native-payments.zh.md \
+  docs/example-inventory.json \
+  docs/maintenance/example-migration-matrix.md
+do
+  if [ ! -f "$LOCAL_PACKAGE_DIR/$packaged" ]; then echo "Local archive is missing packaged example file: $packaged" >&2; exit 2; fi
+done
+for packaged in \
+  examples/legacy/sut-metrics/README.md \
+  examples/legacy/sut-metrics/README.zh.md \
+  examples/legacy/sut-metrics/source.json \
+  examples/package-local-sut-metrics/packages/payments/package.yaml \
+  examples/load/sut-metrics/v2/metric-source-db-wide-row.json \
+  packages/default/testcase/payments/offline-settle/testcase.yaml \
+  packages/legacy/package.yaml \
+  packages/legacy/testcase/payment_regression.xlsx \
+  docs/example-inventory.json
+do
+  case "$SOURCE_ENTRIES" in
+    *"$SOURCE_PACKAGE_NAME/$packaged"*) ;;
+    *) echo "Source archive is missing packaged example file: $packaged" >&2; exit 2 ;;
+  esac
+done
+if printf '%s\n' "$SOURCE_ENTRIES" | grep -F "$SOURCE_PACKAGE_NAME/packages/default/testcase/payment_regression.xlsx" >/dev/null; then
+  echo "Source archive still contains the relocated payment_regression workbook under packages/default" >&2; exit 2
+fi
 if [ -e "$LOCAL_PACKAGE_DIR/schemas" ]; then
   echo "Local archive must not install an ATT_HOME/schemas runtime source: $LOCAL_ARCHIVE" >&2; exit 2
 fi

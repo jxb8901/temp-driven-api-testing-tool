@@ -137,10 +137,10 @@ public final class PackageValidator {
                 if (tool.callBacked()) validateCallBackedDefinition(tool, global);
                 else validateToolExecutable(tool);
             } else if ("template".equals(normalizedType) || "flow".equals(normalizedType)) {
-                StageTemplateLoader loader = new StageTemplateLoader(projectRoot, global.templatesRoot(), false);
-                flows = new att.flow.FlowRegistry(projectRoot, global.templatesRoot(), false);
+                flows = new att.flow.FlowRegistry(projectRoot, global, false);
                 StageTemplate target;
                 if ("template".equals(normalizedType)) {
+                    StageTemplateLoader loader = new StageTemplateLoader(projectRoot, global.templatesRoot(), false);
                     target = loader.loadSelected(id);
                 } else {
                     att.flow.FlowDefinition flow = flows.get(id);
@@ -200,14 +200,21 @@ public final class PackageValidator {
         Map<String, Path> workbookIds = new LinkedHashMap<String, Path>();
         Map<String, CaseLocation> fullCaseIds = new LinkedHashMap<String, CaseLocation>();
         SuiteConfigResolver resolver = new SuiteConfigResolver(projectRoot, global);
-        StageTemplateLoader loader;
-        try { loader = new StageTemplateLoader(projectRoot, global.templatesRoot()); }
-        catch (Exception e) { return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, global.templatesRoot()))); }
-        try { flows = new att.flow.FlowRegistry(projectRoot, global.templatesRoot(), "package".equals(options.validationScope())); }
-        catch (Exception e) { return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, global.templatesRoot().resolve("flows")))); }
+        StageTemplateLoader loader = null;
+        Path templatesDirectory = global.templatesRoot().isAbsolute()
+                ? global.templatesRoot() : projectRoot.resolve(global.templatesRoot());
+        if (java.nio.file.Files.isDirectory(templatesDirectory)) {
+            try { loader = new StageTemplateLoader(projectRoot, global.templatesRoot()); }
+            catch (Exception e) { return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, global.templatesRoot()))); }
+        }
+        try { flows = new att.flow.FlowRegistry(projectRoot, global, "package".equals(options.validationScope())); }
+        catch (Exception e) {
+            Path flowDiag = global.flowRoot() == null ? global.templatesRoot().resolve("flows") : global.flowRoot();
+            return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, flowDiag)));
+        }
         if ("package".equals(options.validationScope())) {
             validatePackageLayout(options, diagnostics);
-            for (String reference : loader.paths()) try {
+            if (loader != null) for (String reference : loader.paths()) try {
                 templates.add(reference);
                 StageTemplate template = loader.load(reference);
                 addContextMigrationWarnings(diagnostics, template);
@@ -221,6 +228,7 @@ public final class PackageValidator {
             } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, flow.directory().resolve("flow.yaml"))); }
             validatePackageTools(diagnostics);
             validateDebugSidecars(diagnostics, loader);
+            cases += validateNativeDefinitions(diagnostics, fullCaseIds);
         }
         for (Path suite : suites) {
             try {
@@ -252,6 +260,8 @@ public final class PackageValidator {
                             validateTestdataMapping(stage.values(), config, Collections.<Path>emptyList(), resolved,
                                     "inputs.stage." + stage.key(),
                                     att.core.ExecutionBootstrapVariables.InputMappingMode.TESTCASE, null);
+                            if (loader == null) throw new IllegalArgumentException(
+                                    "Workbook Stages require a Package templates/ root; this Package has no Templates directory");
                             StageTemplate template = loader.load(stage.templateName());
                             addCaseContextMigrationWarnings(diagnostics, template, testCase, stage, config,
                                     resolved, assignedCaseVariables);
@@ -283,7 +293,7 @@ public final class PackageValidator {
         att.debug.DebugEngine debug = new att.debug.DebugEngine(projectRoot, runtimeConfigPath, global,
                 new att.exec.IbmMqClientFactory(), true, Collections.<String>emptyList(), Collections.<String>emptyList());
         for (String id : global.tools().keySet()) validateDebugSidecar(debug, "tool", id, diagnostics);
-        for (String id : loader.paths()) validateDebugSidecar(debug, "template", id, diagnostics);
+        if (loader != null) for (String id : loader.paths()) validateDebugSidecar(debug, "template", id, diagnostics);
         for (att.flow.FlowDefinition flow : flows.all()) validateDebugSidecar(debug, "flow", flow.id(), diagnostics);
     }
 
@@ -2713,12 +2723,79 @@ public final class PackageValidator {
         if (options.suiteDirectory() != null || options.suitePaths().isEmpty()) {
             Path configured = options.suiteDirectory() == null ? global.testcasesRoot() : options.suiteDirectory();
             Path directory = configured.isAbsolute() ? configured : projectRoot.resolve(configured);
-            try (Stream<Path> stream = Files.walk(directory)) {
+            if (Files.isDirectory(directory)) try (Stream<Path> stream = Files.walk(directory)) {
                 stream.filter(Files::isRegularFile).filter(p -> p.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".xlsx")).sorted().forEach(result::add);
             }
         } else result.addAll(options.suitePaths());
         if (result.isEmpty() && !"package".equals(options.validationScope())) throw new IllegalArgumentException("No Excel suites selected");
         return result;
+    }
+
+    /**
+     * Resolves every Native {@code testcase.yaml} under the configured testcase root without business
+     * execution. Captures schema, Data Source and Definition→Flow diagnostics for {@code validate --package}.
+     */
+    private int validateNativeDefinitions(List<Diagnostic> diagnostics, Map<String, CaseLocation> fullCaseIds) {
+        Path configured = global.testcasesRoot() == null ? Paths.get("testcase") : global.testcasesRoot();
+        Path directory = configured.isAbsolute() ? configured : projectRoot.resolve(configured);
+        if (!Files.isDirectory(directory)) return 0;
+        List<Path> definitions = new ArrayList<Path>();
+        try (Stream<Path> stream = Files.walk(directory)) {
+            stream.filter(Files::isRegularFile)
+                    .filter(path -> "testcase.yaml".equals(path.getFileName().toString()))
+                    .sorted()
+                    .forEach(definitions::add);
+        } catch (Exception error) {
+            diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, error, directory));
+            return 0;
+        }
+        if (definitions.isEmpty()) return 0;
+        Path schema;
+        try { schema = SchemaFiles.resolve(projectRoot, "att-testcase-v1.schema.json"); }
+        catch (Exception error) {
+            diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, error, directory));
+            return 0;
+        }
+        att.testcase.TestCaseDefinitionResolver resolver = new att.testcase.TestCaseDefinitionResolver(schema);
+        att.testcase.TestCaseDefinitionResolver.PackageValidationCaches caches;
+        try {
+            caches = resolver.preparePackageValidationOptions(projectRoot, global.flowRoot(),
+                    global.templatesRoot(), att.testcase.TestCaseDefinitionResolver.Options.defaults());
+        } catch (Exception error) {
+            diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, error, directory));
+            return 0;
+        }
+        for (att.validation.DiagnosticException identityError : caches.identityDiagnostics())
+            diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, identityError, directory));
+        // Package-wide hard identity bounds are terminal: one diagnostic, no per-Definition rescan.
+        if (caches.hardLimitReached()) return 0;
+        att.testcase.TestCaseDefinitionResolver.Options sharedOptions = caches.options();
+        java.util.Set<String> identityFailedLogicalNames = caches.failedLogicalNames();
+        int resolvedCases = 0;
+        att.resource.PackageResourceResolver resources = new att.resource.PackageResourceResolver(projectRoot);
+        for (Path definition : definitions) {
+            try {
+                String logicalName = resources.fromInternalPath(definition, att.resource.PackageResourceResolver.Kind.FILE)
+                        .logicalName();
+                if (identityFailedLogicalNames.contains(logicalName)) continue;
+                att.testcase.TestCaseResolutionResult result = resolver.resolve(definition, "package", projectRoot,
+                        global.flowRoot(), global.templatesRoot(), sharedOptions);
+                for (att.testcase.ResolvedTestCase testCase : result.selectedCases()) {
+                    CaseLocation previous = fullCaseIds.put(testCase.qualifiedCaseId(),
+                            new CaseLocation(definition, testCase.definitionId(), 0));
+                    if (previous != null) diagnostics.add(new Diagnostic(DiagnosticCodes.TESTCASE_INVALID,
+                            Diagnostic.Severity.ERROR,
+                            "Duplicate Qualified Case ID '" + testCase.qualifiedCaseId()
+                                    + "'; first declared at " + previous,
+                            definition.toString(), testCase.definitionId(), null, null, null, null));
+                    resolvedCases++;
+                }
+                // result.truncated() is preview-presentation only; selectedCases() already holds the full plan.
+            } catch (Exception error) {
+                diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, error, definition));
+            }
+        }
+        return resolvedCases;
     }
 
     public static final class ValidationSummary {

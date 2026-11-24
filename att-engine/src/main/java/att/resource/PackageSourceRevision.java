@@ -57,6 +57,7 @@ final class PackageSourceRevision {
         // Root bindings affect validation, but their directory contents do not. Full execution
         // and Job revision checks retain their own business dependency validation.
         binding(digest, root, candidate.templatesRoot());
+        binding(digest, root, candidate.flowRoot());
         binding(digest, root, candidate.testcaseRoot());
         for (Path dependency : business) file(digest, root, dependency, bytes);
         int metricCount = candidate.metricSourceResources().size() + candidate.metricGroupResources().size()

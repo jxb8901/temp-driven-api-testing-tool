@@ -1397,7 +1397,7 @@ stage:
 
 Template 表达式应优先读取 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.environment}` 和当前 Stage 的 `${EXEC.INPUT.channel}`；当前 Stage 的 `values` 会在该 Stage 期间覆盖同名 Case-level input，Stage 结束后恢复。对应的 `CASE.*` 路径仍是兼容 aliases，`CASE.STAGES.*` 只保留为旧的执行／证据视图。
 
-Flow sidecar（`templates/flows/common/compose/debug.yaml`）：
+Flow sidecar（`flows/common/compose/debug.yaml`）：
 
 ```yaml
 schemaVersion: att-debug/v1.0

@@ -130,12 +130,9 @@ class DocumentationExamplesTest {
         }
 
         Map<String, Integer> expected = new TreeMap<String, Integer>();
-        expected.put("att-debug/v1.2", Integer.valueOf(1));
-        expected.put("att-flow/v3.6", Integer.valueOf(4));
+        expected.put("att-flow/v3.6", Integer.valueOf(6));
         expected.put("att-package/v1", Integer.valueOf(1));
-        expected.put("att-sidecar/v2.2", Integer.valueOf(3));
-        expected.put("att-template/v3.6", Integer.valueOf(10));
-        expected.put("att-testcase/v1", Integer.valueOf(3));
+        expected.put("att-testcase/v1", Integer.valueOf(5));
         expected.put("att-testdata/v1.0", Integer.valueOf(1));
         expected.put("att-tool-group/v3.0", Integer.valueOf(3));
         expected.put("att-tool/v1", Integer.valueOf(21));
@@ -147,18 +144,20 @@ class DocumentationExamplesTest {
         Path root = Paths.get("").toAbsolutePath().normalize();
         String config = root.resolve("config/config.yaml").toString();
 
-        assertAsset(root, "packages/default/testcase/payment2.xlsx");
-        assertAsset(root, "packages/default/templates/PAYMENT_INVOKE/debug.yaml");
+        assertAsset(root, "packages/legacy/testcase/payment2.xlsx");
+        assertAsset(root, "packages/legacy/templates/PAYMENT_INVOKE/debug.yaml");
+        assertFalse(Files.exists(root.resolve("packages/default/testcase/payment2.xlsx")));
+        assertFalse(Files.exists(root.resolve("packages/default/templates/PAYMENT_INVOKE")));
         assertAsset(root, "examples/load/closed-smoke.yaml");
         assertAsset(root, "examples/load/arrival-smoke.yaml");
 
-        CliResult run = runCli(root, "run", "--config", config, "--env", "SIT",
-                "--suite", root.resolve("packages/default/testcase/payment2.xlsx").toString(), "--dry-run",
+        CliResult run = runIn(root.resolve("packages/legacy"), "run", "--config", config, "--env", "SIT",
+                "--suite", root.resolve("packages/legacy/testcase/payment2.xlsx").toString(), "--dry-run",
                 "--output-dir", temp.resolve("run-output").toString(), "--run-id", "docs-run",
                 "--format", "json", "--quiet");
         assertEquals(0, run.exitCode, run.stderr);
 
-        CliResult debug = runCli(root, "debug", "template", "PAYMENT_INVOKE", "--config", config,
+        CliResult debug = runIn(root.resolve("packages/legacy"), "debug", "template", "PAYMENT_INVOKE", "--config", config,
                 "--env", "SIT", "--output-dir", temp.resolve("debug-output").toString(),
                 "--format", "json", "--quiet");
         assertEquals(0, debug.exitCode, debug.stderr);
@@ -190,12 +189,12 @@ class DocumentationExamplesTest {
             int fenceIndex = index + 1;
             while (fenceIndex < lines.length && lines[fenceIndex].trim().isEmpty()) fenceIndex++;
             assertTrue(fenceIndex < lines.length, "missing code block after documentation example tag " + id);
-            Matcher fence = Pattern.compile("^```(json|yaml|yml)\\s*$").matcher(lines[fenceIndex].trim());
+            Matcher fence = Pattern.compile("^(```|~~~)(json|yaml|yml)\\s*$").matcher(lines[fenceIndex].trim());
             assertTrue(fence.matches(), "expected a JSON/YAML code block after documentation example tag " + id);
-            String blockFormat = "yml".equals(fence.group(1)) ? "yaml" : fence.group(1);
+            String blockFormat = "yml".equals(fence.group(2)) ? "yaml" : fence.group(2);
             StringBuilder content = new StringBuilder();
             int end = fenceIndex + 1;
-            while (end < lines.length && !"```".equals(lines[end].trim())) {
+            while (end < lines.length && !fence.group(1).equals(lines[end].trim())) {
                 if (content.length() > 0) content.append('\n');
                 content.append(lines[end]);
                 end++;
@@ -208,6 +207,11 @@ class DocumentationExamplesTest {
     }
 
     private CliResult runCli(Path root, String... args) throws Exception {
+        Path packageRoot = root.resolve("packages/default");
+        return runIn(Files.isDirectory(packageRoot) ? packageRoot : root, args);
+    }
+
+    private CliResult runIn(Path directory, String... args) throws Exception {
         List<String> command = new ArrayList<String>(Arrays.asList(
                 Paths.get(System.getProperty("java.home"), "bin", "java").toString(),
                 "-cp", System.getProperty("java.class.path"), "att.FrameworkRunner"));
@@ -216,8 +220,7 @@ class DocumentationExamplesTest {
         Path stdout = temp.resolve("docs-cli-" + (++processCounter) + ".stdout");
         Path stderr = temp.resolve("docs-cli-" + processCounter + ".stderr");
         ProcessBuilder builder = new ProcessBuilder(command);
-        Path packageRoot = root.resolve("packages/default");
-        builder.directory(Files.isDirectory(packageRoot) ? packageRoot.toFile() : root.toFile());
+        builder.directory(directory.toFile());
         builder.environment().put("ORDERS_DB_USERNAME", "docs-example-user");
         builder.environment().put("ORDERS_DB_PASSWORD", "docs-example-password");
         builder.environment().put("PAYMENT_MQ_USERNAME", "docs-example-user");

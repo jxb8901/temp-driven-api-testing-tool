@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -920,6 +921,87 @@ class TestCaseDefinitionResolverTest {
         assertEquals(DiagnosticCodes.TEMPLATE_INVALID, failure.code());
         assertEquals("flow", failure.field());
         assertTrue(failure.summary().contains("both template.yaml and flow.yaml"));
+    }
+
+    @Test void packageValidationCachesReuseIdentityIndexAndFlowTreeAcrossDefinitions() throws Exception {
+        Files.createDirectories(packageRoot.resolve("flows/demo"));
+        Files.write(packageRoot.resolve("flows/demo/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: demo.v1\nname: Demo\ndescription: Shared.\n"
+                        + "actions:\n  note:\n    type: log\n    message: ok\n")
+                        .getBytes(StandardCharsets.UTF_8));
+        List<Path> definitions = new ArrayList<Path>();
+        for (int index = 1; index <= 8; index++) {
+            Path directory = Files.createDirectories(packageRoot.resolve("testcase/d" + index));
+            Path definition = directory.resolve("testcase.yaml");
+            Files.write(definition,
+                    ("schemaVersion: att-testcase/v1\nid: demo.def" + index + "\nflow: demo.v1\n"
+                            + "name: Def" + index + "\ninputs: {}\n")
+                            .getBytes(StandardCharsets.UTF_8));
+            definitions.add(definition);
+        }
+        TestCaseDefinitionResolver.PackageValidationCaches caches = resolver.preparePackageValidationOptions(
+                packageRoot, Paths.get("flows"), Paths.get("templates"),
+                TestCaseDefinitionResolver.Options.defaults());
+        assertTrue(caches.identityDiagnostics().isEmpty(), caches.identityDiagnostics().toString());
+        assertFalse(caches.hardLimitReached());
+        assertEquals(1, resolver.identityCatalogScans);
+        assertEquals(1, resolver.flowTreePreflightScans);
+        assertEquals(1, resolver.flowRegistryBuilds);
+        for (Path definition : definitions) {
+            TestCaseResolutionResult result = resolver.resolve(definition, "package", packageRoot,
+                    Paths.get("flows"), Paths.get("templates"), caches.options());
+            assertEquals(1, result.selectedCount());
+        }
+        assertEquals(1, resolver.identityCatalogScans, "Identity catalog must not be rescanned per Definition");
+        assertEquals(1, resolver.flowTreePreflightScans, "Flow tree must not be preflighted per Definition");
+        assertEquals(1, resolver.flowRegistryBuilds, "FlowRegistry must be indexed once across Definitions");
+    }
+
+    @Test void packageIdentityHardLimitIsTerminalWithoutPerDefinitionRescan() throws Exception {
+        Files.createDirectories(packageRoot.resolve("flows/demo"));
+        Files.write(packageRoot.resolve("flows/demo/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: demo.v1\nname: Demo\ndescription: Shared.\n"
+                        + "actions:\n  note:\n    type: log\n    message: ok\n")
+                        .getBytes(StandardCharsets.UTF_8));
+        int overLimit = TestCaseDefinitionResolver.MAX_PACKAGE_TEST_CASE_DEFINITIONS + 1;
+        for (int index = 1; index <= overLimit; index++) {
+            Path directory = Files.createDirectories(packageRoot.resolve("testcase/d" + index));
+            Files.write(directory.resolve("testcase.yaml"),
+                    ("schemaVersion: att-testcase/v1\nid: demo.d" + index + "\nflow: demo.v1\ninputs: {}\n")
+                            .getBytes(StandardCharsets.UTF_8));
+        }
+        TestCaseDefinitionResolver.PackageValidationCaches caches = resolver.preparePackageValidationOptions(
+                packageRoot, Paths.get("flows"), Paths.get("templates"),
+                TestCaseDefinitionResolver.Options.defaults());
+        assertTrue(caches.hardLimitReached());
+        assertEquals(1, caches.identityDiagnostics().size(), caches.identityDiagnostics().toString());
+        assertTrue(String.valueOf(caches.identityDiagnostics().get(0).detail()).contains("too many"),
+                String.valueOf(caches.identityDiagnostics().get(0).detail()));
+        assertEquals(1, resolver.identityCatalogScans);
+        assertEquals(0, resolver.flowTreePreflightScans);
+        assertEquals(0, resolver.flowRegistryBuilds);
+    }
+
+    @Test void packageIdentityCatalogIncludesDefinitionsOutsideTestcaseRoot() throws Exception {
+        Files.createDirectories(packageRoot.resolve("flows/demo"));
+        Files.write(packageRoot.resolve("flows/demo/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: demo.v1\nname: Demo\ndescription: Shared.\n"
+                        + "actions:\n  note:\n    type: log\n    message: ok\n")
+                        .getBytes(StandardCharsets.UTF_8));
+        Path inside = Files.createDirectories(packageRoot.resolve("testcase/inside")).resolve("testcase.yaml");
+        Files.write(inside, ("schemaVersion: att-testcase/v1\nid: demo.shared\nflow: demo.v1\ninputs: {}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Path outside = Files.createDirectories(packageRoot.resolve("testdata/shadow")).resolve("testcase.yaml");
+        Files.write(outside, ("schemaVersion: att-testcase/v1\nid: Demo.Shared\nflow: demo.v1\ninputs: {}\n")
+                .getBytes(StandardCharsets.UTF_8));
+
+        TestCaseDefinitionResolver.PackageValidationCaches caches = resolver.preparePackageValidationOptions(
+                packageRoot, Paths.get("flows"), Paths.get("templates"),
+                TestCaseDefinitionResolver.Options.defaults());
+        DiagnosticException collision = assertThrows(DiagnosticException.class,
+                () -> resolver.resolve(inside, "package", packageRoot, Paths.get("flows"), Paths.get("templates"),
+                        caches.options()));
+        assertTrue(collision.detail().contains("collides under ASCII case folding"), collision.detail());
     }
 
     private static String sha256(byte[] bytes) throws Exception {

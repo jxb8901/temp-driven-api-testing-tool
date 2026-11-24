@@ -1,7 +1,7 @@
 schemaVersion: att-flow/v3.6
 id: quick.start.v1
 name: Quick Start
-description: Offline Native Case Quick Start Flow (assign/log/assert; optional sample Tool). Mirrors the legacy QUICK_START Template for the Native authoring path without claiming Stage/Template semantic equivalence.
+description: Offline Native Case Quick Start Flow (assign/log/assert; optional sample Tool).
 
 actions:
   captureAmount:

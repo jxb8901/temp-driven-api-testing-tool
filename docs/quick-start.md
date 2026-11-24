@@ -2,7 +2,9 @@
 
 [中文快速入門](quick-start.zh.md) · [Reference Manual](reference.md) · [Migration matrix](maintenance/native-case-default-package-migration-s12.md)
 
-This guide follows the Native Case workflow targeted for ATT 4.6.0. The release and tag have not been published. The target stack contains the inline and Excel Native RUN path, while deployed acceptance remains open under [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) and Default Package adoption remains open under [#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413). Report integration is tracked under [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397); shared-editor deployment evidence remains separate under [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387).
+Maintaining a Package authored with an earlier model? See the [Legacy documentation](legacy/README.md).
+
+This guide follows the Native Case workflow on the current default branch. No 4.6.0 release or tag has been published. Inline and Excel Native RUN are integrated here. Issue [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) is closed for Native RUN acceptance; that closure is not a product release. Default Package adoption remains open under [#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413). Report acceptance remains open under [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397). Shared-editor deployment evidence remains separate under [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387).
 
 Native LOAD Case targets ([#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)), advanced Testdata and generators ([#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)), and Debug interoperability ([#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)) are excluded from this target. Existing direct LOAD and Debug paths remain supported.
 
@@ -13,16 +15,13 @@ Package → Flow → testcase.yaml (+ inline or Excel Data Source)
        → Preview / Resolve → Select Case(s) → Validate → RUN → Results
 ```
 
-Legacy Excel + Sidecar + XML Snapshot + Stage/Template remains supported. Use the [legacy Workbook appendix](#legacy-workbook-quick-start-supported) when that path is still the right one.
-
 The checked-in Native examples are offline: they use only `assign`, `log`, `assert`, and optionally ATT's local sample Tool. No database, MQ, API endpoint, credentials, or network access is required.
 
 ## What you will run
 
-Primary files in the Default Package:
+The Default Package contains these Native Definitions and the read-only Excel Data Source:
 
 ```text
-packages/default/templates/flows/quick-start/flow.yaml
 packages/default/testcase/quick-start/single/testcase.yaml
 packages/default/testcase/quick-start/inline-multi/testcase.yaml
 packages/default/testcase/quick-start/excel/testcase.yaml
@@ -72,7 +71,7 @@ inputs:
   expected: 100
 ```
 
-The Flow at `templates/flows/quick-start/flow.yaml` owns the Actions. The Test Case does not duplicate Steps or assert DSL.
+The Flow at `flows/quick-start/flow.yaml` owns the Actions. The Test Case does not duplicate Steps or assert DSL.
 
 ## Validate the Package
 
@@ -80,7 +79,7 @@ The Flow at `templates/flows/quick-start/flow.yaml` owns the Actions. The Test C
 ./att.sh validate --package
 ```
 
-Validation is read-only. It checks Native Definitions, Flow/Tool closure, and the retained legacy suites together.
+Validation is read-only. It checks Native Definitions and their selected Flow/Tool dependencies.
 
 ## Resolve without executing (dry-run)
 
@@ -125,7 +124,7 @@ Open `report/index.html` for the HTML overview and `ci/summary.json` for machine
 | `INVALID` | Validation prevented execution |
 | `SKIPPED` | Dry-run resolved the Case without executing the Flow |
 
-On this S05-based head, HTML/CI/JUnit evidence follows the existing Native RUN path. **Source-independent standard native XLSX reporting is S07 and is not claimed here.**
+This run also writes the source-independent workbook `workbooks/native-cases.result.xlsx` next to the HTML, CI, and JUnit artifacts. That report is implemented on this branch under `att-testcase/v1`. Issue [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397) remains open for report acceptance. The [offline payments walkthrough](guides/native-payments.md) covers a multi-Flow Suite, per-Case PASS/FAIL evidence, the standard XLSX, and the optional source-workbook report.
 
 ## RUN multiple inline Cases
 
@@ -145,7 +144,7 @@ Qualified IDs are `quick.start.inline.basic` and `quick.start.inline.with-tool`.
   --resolved-case-id QS001 --resolved-case-id QS002
 ```
 
-The workbook `testdata/quick-start-native.xlsx` is a read-only Data Source. Preview and RUN do not modify it and do not create a legacy XML Snapshot. Expect both `quick.start.excel.QS001` and `quick.start.excel.QS002` in the run summary.
+The Excel file `testdata/quick-start-native.xlsx` is a read-only Data Source. Preview and RUN do not modify it. Expect both `quick.start.excel.QS001` and `quick.start.excel.QS002` in the run summary.
 
 ## Studio Preview (when Server/Studio is available)
 
@@ -162,35 +161,12 @@ See [Test authoring — Native Case](reference/test-authoring.md).
 
 | Capability | Status |
 |---|---|
-| Implicit Suite (`run native-suite`, tags across Definitions) | S06 / #396 — implemented in the release-target stack; acceptance pending |
-| Source-independent native XLSX report | S07 / #397 — implemented in the release-target stack; integrated acceptance pending |
-| Native LOAD Case targets | S08 — deferred |
-| Automatic Stage/Template → Flow conversion | #398 — analysis track; keep legacy suites |
-
-## Legacy Workbook Quick Start (supported)
-
-Prefer Native for new work. Keep the Workbook path when you need Stage/Template semantics, existing Snapshot IDs, or workbook report layouts:
-
-```text
-packages/default/testcase/quick_start.xlsx
-packages/default/testcase/quick_start.yaml
-packages/default/testcase/quick_start.xml
-packages/default/templates/QUICK_START/template.yaml
-```
-
-```sh
-./att.sh snapshot --suite testcase/quick_start.xlsx
-./att.sh validate --package
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS002
-```
-
-| Legacy Case ID | Purpose |
-|---|---|
-| `quickStart.default.QS001` | Offline assign/log/assert |
-| `quickStart.default.QS002` | Same path plus local sample Tool |
-
-Do not edit the committed `quick_start.xml` by hand; regenerate with `snapshot` after workbook edits. Full Stage/Template authoring detail remains in [Test authoring](reference/test-authoring.md).
+| Implicit Suite (`run native-suite`, tags, excludes, fail-fast, rerun-failed) | Implemented and integrated on this branch (`att-execution/v2`). [#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) acceptance remains open. Not a 4.6.0 release |
+| Standard native XLSX and optional source-workbook report | Implemented and integrated on this branch (`att-testcase/v1` report contract). [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397) acceptance remains open |
+| Native LOAD Case targets | Deferred under [#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418) |
+| n-to-m generators | Deferred under [#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419) |
+| Debug interoperability | Deferred under [#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420) |
+| Conversion of existing Package behavior | Tracked separately under [#398](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/398) |
 
 ## Next steps
 
@@ -198,6 +174,8 @@ Do not edit the committed `quick_start.xml` by hand; regenerate with `snapshot` 
 |---|---|
 | Native Case fields and Excel mapping | [Test authoring](reference/test-authoring.md) |
 | S12 inventory / migration decisions | [Migration matrix](maintenance/native-case-default-package-migration-s12.md) |
-| Debug a Template/Flow | [Debug](reference/execution-modes/debug.md) |
-| LOAD (existing direct targets) | [Load](reference/execution-modes/load.md) |
+| Debug a Flow or Tool | [Debug](reference/execution-modes/debug.md) |
+| Run a Flow or Tool under LOAD | [Load](reference/execution-modes/load.md) |
+| Multi-Flow offline payments Suite, reports, and rerun-failed | [Native payments walkthrough](guides/native-payments.md) |
 | CLI grammar (includes `run native-case` and `run native-suite`) | [Current CLI Reference](reference/cli.md) |
+| Maintain an existing Package | [Legacy documentation](legacy/README.md) |

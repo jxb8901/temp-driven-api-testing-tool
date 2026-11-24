@@ -180,7 +180,7 @@ def chapter_shape(text):
 
 
 def structure_errors(text):
-    expected_count = 18
+    expected_count = 16
     errors = []
     shape = chapter_shape(text)
     if len(shape) != expected_count:
@@ -223,6 +223,181 @@ def overview_resource_errors(text):
             errors.append("peer Resource diagram omits " + resource)
     if re.search(r"^##\s+(?:三種|3\s+)[^\n]*Resource", text, re.M):
         errors.append("obsolete three-resource heading")
+    return errors
+
+
+def _heading_section(text, match):
+    marks = re.match(r"^(#+)", text[match.start():])
+    level = len(marks.group(1))
+    rest = text[match.end():]
+    nxt = re.search(r"^#{1,%d} " % level, rest, re.M)
+    return rest[:nxt.start()] if nxt else rest
+
+
+def product_model_order_errors(text):
+    """Keep the published Product Model Flow-centric and free of legacy execution chains."""
+    errors = []
+    model = re.search(r"^#{1,6} (?:Product model|產品模型)\s*$", text, re.M)
+    if not model:
+        return ["missing Product model heading"]
+    section = _heading_section(text, model)
+    blocks = re.findall(r"(?:\x60{3}|~{3})text\n(.*?)(?:\x60{3}|~{3})", section, re.S)
+    if not blocks:
+        errors.append("Product model has no text diagram")
+    else:
+        first = blocks[0]
+        if "Resolved Case" not in first or not re.search(r"(?m)^Test Case Definition\b", first):
+            errors.append("first Product model diagram is not the Flow-centric Case path")
+        if "ordered Stage" in first:
+            errors.append("first Product model diagram is the legacy Stage chain")
+    if re.search(r"^#{1,6} (?:Supported legacy compatibility|受支援的 Legacy 相容模型)\s*$",
+                 text, re.M):
+        errors.append("legacy compatibility section belongs in docs/legacy")
+    if re.search(r"Workbook row\s*[-=]+>\s*Stage|Workbook row\s*\n\s*`-- ordered Stage", text):
+        errors.append("legacy Workbook/Stage chain belongs in docs/legacy")
+    primary = section
+    if re.search(r"reusable Template logic|可重用 Template 邏輯", primary):
+        errors.append("primary model defines Flow as Template logic")
+    if re.search(r"normalized workbook row|正規化的 Workbook row", primary):
+        errors.append("primary model defines a Testcase as a workbook row")
+    return errors
+
+
+def flow_authoring_errors(text):
+    """The Flow chapter defines a first-class Action sequence, not Template logic."""
+    errors = []
+    if re.search(r"reusable Template logic|可重用的 Template logic|可重用 Template 邏輯", text):
+        errors.append("Flow is defined as Template logic")
+    heading = re.search(r"^#{1,6} Flow\s*$", text, re.M)
+    if not heading:
+        return errors + ["missing Flow heading"]
+    section = _heading_section(text, heading)
+    if "Test Case Definition" not in section:
+        errors.append("Flow section does not bind a Native Test Case Definition")
+    if "ordered Actions" not in section and "有序 Actions" not in section:
+        errors.append("Flow section does not define ordered Actions")
+    if not re.search(r"Test Case Definition.{0,100}(?:binds|綁定).{0,80}Flow|"
+                     r"Native Test Case Definition.{0,100}Flow", section, re.I | re.S):
+        errors.append("Flow section does not bind the Native Test Case Definition directly")
+    if re.search(r"legacy Template|舊式 Template", section):
+        errors.append("legacy Template invocation belongs in docs/legacy")
+    return errors
+
+
+LEGACY_AUTHORING_PATTERNS = (
+    r"\batt-sidecar/v[0-9]",
+    r"\batt-template/v[0-9]",
+    r"\batt-testcases/v[0-9]",
+    r"\bMETA\.TEMPLATE\b",
+    r"Workbook/Sidecar/Snapshot",
+    r"Workbook row\s*(?:[-=]+>|\n\s*ordered)\s*Stage",
+    r"^#{1,6}\s+(?:Workbook|Stage|Template)(?:\b|\s|$)",
+    r"\b(?:Workbook|Sidecar)\s+(?:authoring|execution model|data source|input|schema)\b",
+    r"\b(?:Template|Stage)\s+(?:authoring|definition|selection|execution model)\b",
+)
+
+
+def legacy_authoring_ownership_errors(rel, text):
+    """Reject old authoring concepts only on current primary documentation surfaces."""
+    errors = []
+    prose = without_code(text)
+    for pattern in LEGACY_AUTHORING_PATTERNS:
+        if re.search(pattern, prose, re.I | re.M):
+            errors.append(rel + ": legacy authoring or execution detail belongs in docs/legacy")
+            break
+    return errors
+
+
+def documentation_ownership_errors(root, manifest_items):
+    """Keep current docs Native-first and give earlier Package behavior a bilingual home."""
+    errors = []
+    if any("legacy/" in item.casefold() for item in manifest_items):
+        errors.append("Legacy pages must stay outside the generated current Reference manual")
+    required = (
+        "README.md", "README.zh.md", "authoring.md", "authoring.zh.md",
+        "execution.md", "execution.zh.md", "configuration.md", "configuration.zh.md",
+        "migration.md", "migration.zh.md", "cli.md", "cli.zh.md",
+        "reliability-reference.md", "reliability-reference.zh.md",
+        "server-run-reference.md", "server-run-reference.zh.md",
+        "report-reference.md", "report-reference.zh.md",
+        "schema-matrix.md", "schema-matrix.zh.md",
+        "compatibility-reference.md", "compatibility-reference.zh.md",
+        "migration-reference.md", "migration-reference.zh.md",
+    )
+    for rel in required:
+        path = root / "docs" / "legacy" / rel
+        if not path.is_file():
+            errors.append("missing dedicated Legacy documentation: docs/legacy/" + rel)
+
+    legacy_index = root / "docs/legacy/README.md"
+    legacy_index_zh = root / "docs/legacy/README.zh.md"
+    if legacy_index.is_file():
+        index_text = legacy_index.read_text(encoding="utf-8")
+        for rel in required:
+            if rel.endswith(".zh.md") or rel in ("README.md", "README.zh.md"):
+                continue
+            if "(" + rel + ")" not in index_text:
+                errors.append("docs/legacy/README.md does not link " + rel)
+    if legacy_index_zh.is_file():
+        index_text = legacy_index_zh.read_text(encoding="utf-8")
+        for rel in required:
+            if not rel.endswith(".zh.md") or rel == "README.zh.md":
+                continue
+            if "(" + rel + ")" not in index_text:
+                errors.append("docs/legacy/README.zh.md does not link " + rel)
+
+    for rel in (
+            "docs/quick-start.md", "docs/reference/overview.md",
+            "docs/reference/test-authoring.md", "docs/reference/execution-modes/run.md",
+            "docs/reference/execution-modes/debug.md", "docs/reference/validation-diagnostics.md"):
+        path = root / rel
+        if path.is_file() and "legacy/README.md" not in path.read_text(encoding="utf-8"):
+            errors.append(rel + ": add one Legacy navigation link for existing Packages")
+    for rel in (
+            "docs/quick-start.zh.md", "docs/reference.zh/overview.md",
+            "docs/reference.zh/test-authoring.md", "docs/reference.zh/execution-modes/run.md",
+            "docs/reference.zh/execution-modes/debug.md", "docs/reference.zh/validation-diagnostics.md"):
+        path = root / rel
+        if path.is_file() and "legacy/README.zh.md" not in path.read_text(encoding="utf-8"):
+            errors.append(rel + ": add one Legacy navigation link for existing Packages")
+
+    current_surfaces = (
+        "docs/quick-start.md", "docs/quick-start.zh.md",
+        "docs/concepts/authoring-model.md", "docs/concepts/authoring-model.zh.md",
+        "docs/concepts/execution-model.md", "docs/concepts/execution-model.zh.md",
+        "docs/concepts/package-model.md", "docs/concepts/package-model.zh.md",
+        "docs/guides/run-tests.md", "docs/guides/run-tests.zh.md",
+        "docs/guides/load-testing.md", "docs/guides/load-testing.zh.md",
+        "docs/reference.md", "docs/reference.zh.md",
+    )
+    current_surfaces += tuple("docs/reference/" + item for item in manifest_items)
+    current_surfaces += tuple("docs/reference.zh/" + item for item in manifest_items)
+    zh_ci = root / "docs/reference.zh/ci-packaging-operations.md"
+    if zh_ci.is_file():
+        zh_ci_text = zh_ci.read_text(encoding="utf-8")
+        if "相同 Template" in zh_ci_text:
+            errors.append("docs/reference.zh/ci-packaging-operations.md explains cross-environment reuse with Template")
+        if "同一個 Flow" not in zh_ci_text:
+            errors.append("docs/reference.zh/ci-packaging-operations.md does not explain cross-environment reuse with Flow")
+    for rel in ("docs/reference/package-manifest.md", "docs/reference.zh/package-manifest.md"):
+        path = root / rel
+        if not path.is_file():
+            errors.append("missing " + rel)
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "resources.flowRoot" not in text:
+            errors.append(rel + ": document resources.flowRoot")
+        if "flows/" not in text:
+            errors.append(rel + ": state that the canonical Flow root is flows/")
+        if "not yet supported" in text or "尚未支援" in text:
+            errors.append(rel + ": remove the pre-#430 standalone flows/ limitation")
+
+    for rel in current_surfaces:
+        path = root / rel
+        if path.is_file():
+            errors.extend(legacy_authoring_ownership_errors(
+                rel, path.read_text(encoding="utf-8")))
+
     return errors
 
 
@@ -419,6 +594,7 @@ def validate(root=ROOT):
     items = [s.strip() for s in manifest.read_text(encoding="utf-8").splitlines()
              if s.strip() and not s.lstrip().startswith("#")]
     errors += manifest_errors(items)
+    errors += documentation_ownership_errors(root, items)
     assembled = {}
     source_shapes = {}
     for lang in ("reference", "reference.zh"):
@@ -442,13 +618,30 @@ def validate(root=ROOT):
         assembled[lang] = generated.read_text(encoding="utf-8") if generated.is_file() else text
         overview = (module_root / "overview.md").read_text(encoding="utf-8")
         errors += [lang + "/overview.md: " + e for e in overview_resource_errors(overview)]
+        errors += [lang + "/overview.md: " + e for e in product_model_order_errors(overview)]
+        errors += [lang + ".md: " + e for e in product_model_order_errors(assembled[lang])]
+        authoring = (module_root / "test-authoring.md").read_text(encoding="utf-8")
+        errors += [lang + "/test-authoring.md: " + e for e in flow_authoring_errors(authoring)]
+        errors += [lang + ".md: " + e for e in flow_authoring_errors(assembled[lang])]
         errors += [lang + ": " + e for e in structure_errors(assembled[lang])]
         matrix = (module_root / "appendices/schema-matrix.md").read_text(encoding="utf-8")
         found = {(m.group(1).lower(), m.group(2)) for m in SCHEMA_TOKEN.finditer(matrix)}
-        expected = {(name, version) for name, versions in active.items() for version in versions}
+        legacy_authoring_schemas = {"att-sidecar", "att-testcases", "att-template"}
+        expected = {(name, version) for name, versions in active.items()
+                    for version in versions if name not in legacy_authoring_schemas}
         if found != expected:
             errors.append("%s active schema matrix differs from catalog: missing=%s extra=%s" %
                           (lang, sorted(expected - found), sorted(found - expected)))
+        legacy_docs = root / "docs" / "legacy"
+        legacy_corpus = "\n".join(path.read_text(encoding="utf-8")
+                                  for path in legacy_docs.glob("*.md"))
+        legacy_found = {(m.group(1).lower(), m.group(2))
+                        for m in SCHEMA_TOKEN.finditer(legacy_corpus)}
+        legacy_expected = {(name, version) for name, versions in active.items()
+                           for version in versions if name in legacy_authoring_schemas}
+        if not legacy_expected.issubset(legacy_found):
+            errors.append("Legacy authoring schema documentation is incomplete: missing=%s" %
+                          sorted(legacy_expected - legacy_found))
     if chapter_shape(assembled["reference"]) != chapter_shape(assembled["reference.zh"]):
         errors.append("EN/ZH top-level chapter/appendix structure differs")
     if set(source_shapes["reference"]) != set(source_shapes["reference.zh"]):

@@ -22,7 +22,13 @@ class ServerRuntimeInspectionTest {
     @TempDir Path temp;
 
     @Test void listsPackageResourcesThroughTheBoundedInspectorWorkerAndSignsPaginationCursors() throws Exception {
-        Path packageRoot=Path.of("").toRealPath().resolve("packages/default");Path allowed=packageRoot;
+        Path allowed=Files.createDirectories(temp.resolve("inspection-packages"));
+        Path packageRoot=Files.createDirectories(allowed.resolve("p"));
+        Files.createDirectories(packageRoot.resolve("testcase"));
+        writeMinimalTemplate(packageRoot,"alpha","Alpha");
+        writeMinimalTemplate(packageRoot,"beta","Beta");
+        Files.writeString(packageRoot.resolve("package.yaml"),
+                "schemaVersion: att-package/v1\nmetadata:\n  name: Pagination fixture\n");
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path configFile=temp.resolve("inspection-runtime-server.yaml");
         Files.writeString(configFile,"server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("inspection-runtime-data"))+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(allowed)+"\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"\n");
@@ -219,5 +225,13 @@ class ServerRuntimeInspectionTest {
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getDebugDraft(draftId,"alice"));
             assertTrue(Files.exists(debugSidecar));
         } finally {runtime.close();}
+    }
+
+    private static void writeMinimalTemplate(Path packageRoot,String id,String label) throws Exception {
+        Path directory=Files.createDirectories(packageRoot.resolve("templates").resolve(id));
+        Files.writeString(directory.resolve("template.yaml"),
+                "schemaVersion: att-template/v3.6\nname: "+label+"\n"
+                +"description: Pagination fixture "+id+".\n"
+                +"actions:\n  note:\n    type: log\n    message: "+label+"\n");
     }
 }

@@ -4,7 +4,7 @@
 - **Scope:** Existing workbook/Sidecar Stage execution versus Native Case execution through one Flow.
 - **Release track:** ATT 4.6.0 release target; release and tag have not been published.
 - **Runtime changes:** None in this slice. The golden fixture exercises the current public APIs and pins observed differences.
-- **Acceptance status:** S10 remains an analysis baseline, not an accepted replacement contract. Deployed acceptance remains open for Native RUN ([#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)), report integration ([#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)), and Default Package adoption ([#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413)); shared-editor deployment evidence is separate ([#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387)).
+- **Acceptance status:** S10 remains an analysis baseline, not an accepted replacement contract. Native RUN acceptance ([#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)) is closed and is not a published 4.6.0 release. Report acceptance ([#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)) and Default Package adoption ([#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413)) remain open. Shared-editor deployment evidence is separate ([#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387)).
 - **Related:** [Issue #398](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/398), [ADR-0001](../adr/0001-flow-centric-testcase-resolution.md), [Traditional Chinese](template-flow-stage-compatibility.zh.md).
 
 ## Acceptance summary

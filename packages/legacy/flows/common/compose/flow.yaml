@@ -1,0 +1,11 @@
+schemaVersion: att-flow/v3.6
+id: common.compose.v1
+name: Compose Value
+description: Example of statically nested Flow composition with isolated Action scopes.
+actions:
+  identityFlow:
+    type: flow
+    use: common.identity.v1
+  decorateFlow:
+    type: flow
+    use: common.decorate.v1

@@ -386,35 +386,40 @@ def check_cli_documentation():
     source = read(ROOT / "att-cli/src/main/java/att/CliOptions.java")
     supported_options = set(re.findall(r'"(--[a-z][a-z0-9-]*)"', source))
     supported_options.update(("--server", "--no-auth", "--principal", "--detach", "--download", "--scenario"))
-    # Native Case / vNext Local options are implemented beside the legacy CLI (S03+) and may
-    # appear in Quick Start / current guides without expanding the released CLI Reference surface.
+    # Native Case / vNext Local options are implemented beside the compatibility CLI.
     native_case_options = set(("--local", "--resolved-case-id"))
     documented_command_options = set(supported_options)
     documented_command_options.update(native_case_options)
     public_commands = set(("run", "validate", "snapshot", "docs", "report",
                            "build", "clean", "version", "debug", "load", "help", "remote"))
 
-    for rel in ("reference/cli.md", "reference.zh/cli.md"):
+    for rel, legacy_rel in (("reference/cli.md", "legacy/cli.md"),
+                            ("reference.zh/cli.md", "legacy/cli.zh.md")):
         path = DOCS / rel
-        if not path.is_file():
+        legacy_path = DOCS / legacy_rel
+        if not path.is_file() or not legacy_path.is_file():
             fail("missing CLI Reference: docs/%s" % rel)
             continue
         text = read(path)
+        compatibility_text = read(legacy_path)
+        all_text = text + "\n" + compatibility_text
         for command in sorted(public_commands):
             if not re.search(r"(?:\./att\.sh|att\.bat)\s+%s\b" %
-                             re.escape(command), text):
+                             re.escape(command), all_text):
                 fail("%s does not document public command: %s" %
                      (path.relative_to(ROOT), command))
-        documented_options = set(re.findall(r"--[a-z][a-z0-9-]*", text))
+        documented_options = set(re.findall(r"--[a-z][a-z0-9-]*", all_text))
         for option in sorted(supported_options - documented_options):
-            fail("%s does not document supported CLI option: %s" %
-                 (path.relative_to(ROOT), option))
-        for option in sorted(documented_options - supported_options):
-            fail("%s documents unsupported CLI option: %s" %
-                 (path.relative_to(ROOT), option))
+            fail("current and Legacy CLI References do not document supported CLI option: %s" %
+                 option)
+        for option in sorted(documented_options - documented_command_options):
+            fail("current and Legacy CLI References document unsupported CLI option: %s" %
+                 option)
+        if not re.search(r"run native-case", text) or not re.search(r"run native-suite", text):
+            fail("%s does not define the Native Case and Suite commands" % path.relative_to(ROOT))
         for code in ("0", "1", "2", "3"):
             if not re.search(r"(?:exit(?:\s+code)?|退出码|退出碼)[^\n]{0,80}\b%s\b|\b%s\b[^\n]{0,80}(?:PASS|FAIL|INVALID|ERROR|runtime|validation)" %
-                             (code, code), text, re.I):
+                             (code, code), all_text, re.I):
                 fail("%s does not clearly cover exit code %s" %
                      (path.relative_to(ROOT), code))
 
@@ -503,7 +508,7 @@ def check_vnext_cli_contract():
         if documented_options != supported_options:
             fail("%s vNext options differ from VNextOptions: undocumented=%s unsupported=%s" %
                  (path.relative_to(ROOT), sorted(supported_options - documented_options),
-                  sorted(documented_options - supported_options)))
+                  sorted(documented_options - documented_command_options)))
 
         backtick = chr(96)
         if rel.endswith(".zh.md"):
@@ -706,13 +711,25 @@ def check_secret_placeholders():
 
 def check_critical_examples():
     assets = (
-        "packages/default/testcase/payment2.xlsx",
-        "packages/default/templates/PAYMENT_INVOKE/debug.yaml",
-        "packages/default/templates/flows/quick-start/flow.yaml",
+        "packages/legacy/testcase/payment2.xlsx",
+        "packages/legacy/templates/PAYMENT_INVOKE/debug.yaml",
+        "packages/default/flows/quick-start/flow.yaml",
         "packages/default/testcase/quick-start/single/testcase.yaml",
         "packages/default/testcase/quick-start/inline-multi/testcase.yaml",
         "packages/default/testcase/quick-start/excel/testcase.yaml",
         "packages/default/testdata/quick-start-native.xlsx",
+        "packages/default/flows/payments/offline-authorize/flow.yaml",
+        "packages/default/flows/payments/offline-settle/flow.yaml",
+        "packages/default/testcase/payments/offline-authorize/testcase.yaml",
+        "packages/default/testcase/payments/offline-settle/testcase.yaml",
+        "packages/default/testdata/payments-offline-settle.xlsx",
+        "docs/guides/native-payments.md",
+        "docs/guides/native-payments.zh.md",
+        "docs/example-inventory.json",
+        "examples/legacy/sut-metrics/README.md",
+        "examples/legacy/sut-metrics/source.json",
+        "examples/package-local-sut-metrics/README.md",
+        "examples/package-local-sut-metrics/README.zh.md",
         "docs/maintenance/native-case-default-package-migration-s12.md",
         "examples/load/closed-smoke.yaml",
         "examples/load/arrival-smoke.yaml",
@@ -754,7 +771,7 @@ def check_critical_examples():
         fail("missing Java documentation example regression test: att-cli/src/test/java/att/docs/DocumentationExamplesTest.java")
     else:
         test_text = read(test)
-        for rel in ("packages/default/testcase/payment2.xlsx", "packages/default/templates/PAYMENT_INVOKE/debug.yaml",
+        for rel in ("packages/legacy/testcase/payment2.xlsx", "packages/legacy/templates/PAYMENT_INVOKE/debug.yaml",
                     "examples/load/closed-smoke.yaml", "examples/load/arrival-smoke.yaml",
                     "config/environments/sit.yaml", "config/environments/uat.yaml",
                     "config/mqhelpers/sit/payment.yaml", "packages/default/tools/orders/findByDate.yaml"):
@@ -824,6 +841,90 @@ def check_ownership_links():
                  path.relative_to(ROOT))
 
 
+def check_example_inventory():
+    inventory_path = DOCS / "example-inventory.json"
+    if not inventory_path.is_file():
+        fail("missing example inventory: docs/example-inventory.json")
+        return
+    inventory = json.loads(read(inventory_path))
+    if inventory.get("schemaVersion") != "att-example-inventory/v1":
+        fail("docs/example-inventory.json schemaVersion must be att-example-inventory/v1")
+    entries = inventory.get("entries")
+    if not isinstance(entries, list) or not entries:
+        fail("docs/example-inventory.json has no entries")
+        return
+    seen = set()
+    covered = set()
+    executable = []
+    for entry in entries:
+        entry_id = entry.get("id")
+        rel = entry.get("path")
+        status = entry.get("migrationStatus")
+        runtime = entry.get("runtimeSupport")
+        ci_runnable = entry.get("ciRunnable")
+        if not entry_id or entry_id in seen:
+            fail("example inventory id is missing or duplicated: %s" % entry_id)
+        seen.add(entry_id)
+        if status not in ("current", "planned", "legacy", "blocked"):
+            fail("example inventory migrationStatus is invalid for %s: %s" % (entry_id, status))
+        if entry.get("status") != status:
+            fail("example inventory status must mirror migrationStatus for %s" % entry_id)
+        if runtime not in ("native", "legacy-compatible", "executable-flow", "package-owned",
+                           "archived", "contract-sample", "load-scenario", "documentation", "deferred"):
+            fail("example inventory runtimeSupport is invalid for %s: %s" % (entry_id, runtime))
+        if not isinstance(ci_runnable, bool) or entry.get("executable") is not ci_runnable:
+            fail("example inventory ciRunnable must be boolean and executable must mirror it for %s" % entry_id)
+        if not isinstance(rel, str) or not (ROOT / rel).is_file():
+            fail("example inventory path is missing: %s" % rel)
+            continue
+        covered.add(rel)
+        if status == "legacy" and not (rel.startswith("examples/legacy/") or rel.startswith("examples/history/")
+                                        or rel.startswith("packages/legacy/")):
+            fail("legacy inventory entry is outside an explicit legacy location: %s" % rel)
+        if status == "blocked":
+            if ci_runnable or "This file is" not in str(entry.get("reason")):
+                fail("blocked inventory entry needs its own file-specific blocker: %s" % rel)
+        if status == "current" and (rel.startswith("examples/legacy/") or rel.startswith("packages/legacy/")):
+            fail("current inventory entry points at a legacy location: %s" % rel)
+        if "/flows/common/" in rel:
+            if runtime != "executable-flow" or ci_runnable:
+                fail("common Flow must stay executable and outside the offline native-suite fixture set: %s" % rel)
+            if rel.startswith("packages/legacy/") and status != "legacy":
+                fail("packages/legacy common Flow is a dependency copy and must be legacy: %s" % rel)
+            if rel.startswith("packages/default/") and status != "current":
+                fail("packages/default common Flow must stay current: %s" % rel)
+        if ci_runnable:
+            if status != "current" or runtime != "native" or entry.get("environment") != "offline":
+                fail("ciRunnable inventory entry must be a current offline native fixture: %s" % entry_id)
+            executable.append(rel)
+        if status == "planned" and ci_runnable:
+            fail("planned inventory entry must not be in the offline CI fixture set: %s" % entry_id)
+    if not executable:
+        fail("example inventory does not name an executable current Native Suite fixture")
+    expected = []
+    for base in ("packages/default/flows", "packages/default/testcase", "packages/default/testdata",
+                 "packages/default/tools", "packages/legacy", "examples"):
+        base_path = ROOT / base
+        if not base_path.is_dir():
+            continue
+        for path in base_path.rglob("*"):
+            if path.is_file():
+                expected.append(path.relative_to(ROOT).as_posix())
+    missing = sorted(path for path in expected if path not in covered)
+    if missing:
+        fail("example inventory does not classify every Package/example file: %s" % ", ".join(missing[:12]))
+    load_readme = read(ROOT / "examples/load/README.md")
+    if "Register `source.json`" in load_readme:
+        fail("examples/load/README.md still tells readers to register the retired SUT Metrics catalog")
+    if "examples/package-local-sut-metrics" not in load_readme or "examples/legacy/sut-metrics" not in load_readme:
+        fail("examples/load/README.md must point at the package-local example and the archived catalog")
+    matrix = read(DOCS / "maintenance/example-migration-matrix.md")
+    if "packages/legacy/testcase/payment_regression.xlsx" not in matrix or "packages/default" not in matrix:
+        fail("migration matrix must record the packages/legacy cutover and the remaining default package")
+    if "packages/default/testcase/payment_regression.xlsx" in matrix:
+        fail("migration matrix still lists payment_regression under packages/default")
+
+
 def main():
     version = product_version()
 
@@ -855,6 +956,7 @@ def main():
     check_critical_examples()
     check_documentation_status()
     check_documented_examples()
+    check_example_inventory()
     check_ownership_links()
 
     markdown_files = [ROOT / "README.md", HISTORY_INDEX]

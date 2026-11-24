@@ -1472,11 +1472,8 @@ public final class PackageResourceInspector implements AutoCloseable {
         Path templatesCandidate = config.templatesRoot().isAbsolute()
                 ? config.templatesRoot() : packageRoot.resolve(config.templatesRoot());
         Path templatesRoot = optionalPackageDirectory(templatesCandidate, "resources.templatesRoot");
-
-        if (templatesRoot != null) {
-            indexTemplates(index, config, templatesRoot);
-            indexFlows(index, config, templatesRoot);
-        }
+        if (templatesRoot != null) indexTemplates(index, config, templatesRoot);
+        indexFlows(index, config);
         indexTools(index, config);
         indexRuntimeConfigFiles(index);
         indexCases(index, config);
@@ -2348,9 +2345,12 @@ public final class PackageResourceInspector implements AutoCloseable {
         FrameworkConfig config = new FrameworkConfigLoader().loadDiscovery(configFile, runtimeConfigRoot, packageRoot, environment);
         Path templatesRoot = config.templatesRoot().isAbsolute()
                 ? config.templatesRoot() : packageRoot.resolve(config.templatesRoot());
+        Path flowRoot = config.flowRoot().isAbsolute()
+                ? config.flowRoot() : packageRoot.resolve(config.flowRoot());
         Path casesRoot = config.testcasesRoot().isAbsolute()
                 ? config.testcasesRoot() : packageRoot.resolve(config.testcasesRoot());
         addWatchRoot(templatesRoot, roots);
+        addWatchRoot(flowRoot, roots);
         addWatchRoot(casesRoot, roots);
         Path toolDirectory = packageRoot.resolve("tools");
         if (Files.isDirectory(toolDirectory, LinkOption.NOFOLLOW_LINKS)) addWatchRoot(toolDirectory, roots);
@@ -2427,9 +2427,9 @@ public final class PackageResourceInspector implements AutoCloseable {
         }
     }
 
-    private void indexFlows(Index index, FrameworkConfig config, Path templatesRoot) {
+    private void indexFlows(Index index, FrameworkConfig config) {
         try {
-            FlowRegistry registry = new FlowRegistry(packageRoot, templatesRoot, false);
+            FlowRegistry registry = new FlowRegistry(packageRoot, config, false);
             for (String id : registry.ids()) {
                 if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException("resourceInspector.maxResources", MAX_RESOURCES, index.ordered.size() + 1L);
                 Resource resource = new Resource("flow", resourceId("flow", id), id);
@@ -2462,7 +2462,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         } catch (ResourceLimitException error) {
             throw error;
         } catch (Exception error) {
-            throw invalidResourceRoot("resources.templatesRoot");
+            throw invalidResourceRoot("resources.flowRoot");
         }
     }
 

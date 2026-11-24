@@ -1,23 +1,21 @@
 # Run 模式
 
-<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
+Native RUN 會執行 Test Case Definition 中所選的 Resolved Case。Case 會解析至 Flow 和 Data Source；開始執行前，RUN 會驗證所選的 dependency closure。新工作請從[快速入門](../../quick-start.zh.md)開始。維護以較早模型編寫的 Package，請參閱[舊版文件](../../legacy/README.zh.md)。
 
-舊版 `./att.sh run` command 仍是 Case adapter，會執行 Workbook 中選取的 authored Testcase。4.6.0 release-target CLI 亦加入明確的 Native Case 和 Native Suite command，詳見 [Unified RUN](unified-run.md) 及 [CLI Reference](../cli.md)。目標 release 和 tag 尚未發佈，部署驗收仍待完成。
+## 選擇 Case
 
-```sh
-./att.sh run --all
-./att.sh run --suite testcase/payment.xlsx --case payment.payment.TC001
-./att.sh run --all --tag smoke --exclude-tag slow
-```
+可用 qualified ID 選擇一個 Case，或用 implicit Suite 按 Definition、ID 或 tag 選取 Cases。不需要 `suite.yaml`。Excluded tag 優先於 included tag。若 selection 不存在或為空，RUN 會拒絕執行，不會改用其他 selection。
 
-ATT 先載入 effective configuration/environment、驗證 canonical workbook snapshot 和 selected dependency closure、保留唯一 Run ID，然後為每個選中的 Testcase 啟動一次 Case execution。Stages 依序執行。每個 Stage selector 都會解析為 Template；Action 按 YAML 順序執行，並受 `runWhen` / `onFailure` 控制。
+[Unified RUN Reference](unified-run.md) 說明 Server draft 與 schedule lifecycle。[CLI Reference](../cli.md) 定義 command 語法和 exit code。
 
-沒有 `--run-id <id>` 時，可使用 `execution.runIdFormat` 產生外層 Run ID；否則沿用 `run.id.timestampFormat` default。Format 在發布 `EXEC.RUN_ID` 或 output path 前只初始化一次。可用 Context 與 built-ins 見[package-wide configuration](../configuration.md#設定-package-wide-options)。CLI ID 是優先級最高的 literal override。
+## 驗證及執行
 
-Run evidence 直接寫到 `output/<RunID>/`。完成後才發布 `run.yaml`、Case directories/logs、結果 workbook、HTML/CI output，並更新 `latest-run.yaml`。已存在的 Run ID 會被拒絕，不會覆寫。`run --update-snapshot` 是執行前明確授權更新 snapshot 的唯一流程。
+Case 開始前，ATT 會驗證 Definition、已解析的 Data Source、Flow 和被引用的 Resource contract。Server draft 會凍結所選 Case ID 和 Package source revision；source 改變後必須重新驗證。Preview 和 validation 不會提交 Job。
 
-Status aggregation 的嚴重度為 ERROR > INVALID > FAIL > PASS > SKIPPED。Process exit code：`0` 表示沒有失敗狀態、`1` 表示測試/assertion failure、`2` 表示 command/configuration/validation 無效、`3` 表示 runtime/infrastructure error。
+每個 Resolved Case 會產生一次 Case execution，各自有 execution ID、status 和 evidence。RUN 會把結果寫入唯一 run directory，並只在完成後更新 `latest-run.yaml`。已存在的 Run ID 會被拒絕，不會覆寫。
 
-selector 和 option 請看 [CLI Reference](../cli.md)，Stage 和 Action control 請看 [Reliability and Execution Control](../reliability-execution-control.md)，artifact contract 請看 [Results, Reports, and Evidence](../results-reports-evidence.md)。
+## 結果和失敗狀態
 
-在 Studio 從 Job 選擇 **Configure & Rerun**，會把安全保留的 RUN target 或 exact Case selection、environment、Debug／fail-fast options 及符合安全條件的 typed inputs 載入此標準 RUN editor。修改後需依目前 Package 驗證，再檢查並提交。Source policy 與 API 行為見 [Job replay 與建立新執行](unified-run.md)。
+Status aggregation 保留嚴重程度：ERROR > INVALID > FAIL > PASS > SKIPPED。Run 完成且沒有失敗時 process exit code 為 `0`；Case/assertion 失敗為 `1`；command/configuration/validation 無效為 `2`；runtime 或 infrastructure error 為 `3`。
+
+在 Studio 中，**Configure & Rerun** 會依保留的 RUN definition 建立新的已驗證 draft。提交前請檢查 Package revision 和 selection。詳見[Unified RUN](unified-run.md)。

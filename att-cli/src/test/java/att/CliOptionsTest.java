@@ -53,11 +53,11 @@ class CliOptionsTest {
 
     @Test void parsesStandaloneDebugTargetAndInput() {
         CliOptions options = CliOptions.parse(new String[]{"debug", "flow", "common.compose.v1",
-                "--input", "templates/flows/common/compose/debug.yaml", "--output-dir", "out", "--verbose"});
+                "--input", "flows/common/compose/debug.yaml", "--output-dir", "out", "--verbose"});
         assertEquals("debug", options.command());
         assertEquals("flow", options.debugTargetType());
         assertEquals("common.compose.v1", options.debugTargetId());
-        assertEquals(java.nio.file.Paths.get("templates/flows/common/compose/debug.yaml"), options.debugInput());
+        assertEquals(java.nio.file.Paths.get("flows/common/compose/debug.yaml"), options.debugInput());
         assertEquals("debug", options.validationScope());
         assertTrue(options.verbose());
         assertFalse(options.profile());

@@ -2,7 +2,7 @@
 
 The current configuration contract separates shared connections from metric definitions. Global `att-config/v2.15` keeps Data Source connection descriptors. The selected Package owns its Metric Sources, Groups, and Profiles through an explicit `att-package/v2` inventory. A LOAD scenario must select a Profile from that Package before metrics are collected.
 
-The complete file layout is in the [Package-local SUT Metrics example](../../examples/package-local-sut-metrics/README.md). It includes the global SIT/UAT connection descriptors and one Package's definitions.
+The complete file layout is in the [Package-local SUT Metrics example](../../examples/package-local-sut-metrics/README.md). It includes the global SIT/UAT connection descriptors and one Package's definitions. The former Settings catalog (`source.json` plus v1 composite profiles) is archived at [examples/legacy/sut-metrics](../../examples/legacy/sut-metrics/README.md). Do not register those files in Settings.
 
 ## Ownership after migration
 

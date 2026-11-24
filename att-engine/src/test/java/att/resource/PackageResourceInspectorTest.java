@@ -36,7 +36,11 @@ class PackageResourceInspectorTest {
 
     private PackageResourceInspector inspector() throws Exception {
         Path home=Paths.get("").toRealPath();
-        Path root=home.resolve("packages/default");
+        return inspector(home.resolve("packages/default"));
+    }
+
+    private PackageResourceInspector inspector(Path root) throws Exception {
+        Path home=Paths.get("").toRealPath();
         Path config=home.resolve("config/config.yaml");
         assertTrue(Files.isRegularFile(config),"Tests run from the repository root");
         return new PackageResourceInspector(root,config,"SIT",Collections.<String>emptyList(),65536,262144);
@@ -173,7 +177,8 @@ class PackageResourceInspectorTest {
     }
 
     @Test void listsConfiguredPackageResourcesWithLogicalIdsAndReferences() throws Exception {
-        Map<String,Object> page=inspector().inspect("list",null,null,null,0,100);
+        Path legacyPackage=Paths.get("").toRealPath().resolve("packages/legacy");
+        Map<String,Object> page=inspector(legacyPackage).inspect("list",null,null,null,0,100);
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
         assertFalse(items.isEmpty());
         List<String> types=items.stream().map(item->String.valueOf(item.get("type"))).distinct().collect(Collectors.toList());

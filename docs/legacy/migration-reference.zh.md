@@ -2,14 +2,14 @@
 
 ## Load 獨立 evidence 配額
 
-有限 Load evidence 配額須使用 `att-load/v1.7`。使用 `maxSamples`，或使用共用 `maxSuccessSamples`／`maxFailureSamples` 組合的 legacy scenario，均保留既有語義。Per-workload cap 必須明確設定 `evidence.quotaScope: perWorkload`。此模式下請設定 `evidence.defaults` 及可選的 cap-only `workloads[].evidence` override；不要加入 root `maxSamples`、`maxSuccessSamples` 或 `maxFailureSamples`。每個 workload 的 cap 互相獨立，不會出借、借用、收回容量，也不會因配額刪除已保留 artifact。限制、驗證及 reporting 見 [Load](../execution-modes/load.md#獨立-evidence-配額)。
+有限 Load evidence 配額須使用 `att-load/v1.7`。使用 `maxSamples`，或使用共用 `maxSuccessSamples`／`maxFailureSamples` 組合的 legacy scenario，均保留既有語義。Per-workload cap 必須明確設定 `evidence.quotaScope: perWorkload`。此模式下請設定 `evidence.defaults` 及可選的 cap-only `workloads[].evidence` override；不要加入 root `maxSamples`、`maxSuccessSamples` 或 `maxFailureSamples`。每個 workload 的 cap 互相獨立，不會出借、借用、收回容量，也不會因配額刪除已保留 artifact。限制、驗證及 reporting 見 [Load](../reference/execution-modes/load.md)。
 
 
 ## MQ request queue 路由
 
 可選的 pool 生命週期欄位（`maxIdle`、`maxLifetime`、`staleIdleValidation`、`staleIdleThreshold`、`validationTimeout`、`heartbeatInterval`）必須使用 `att-mqhelper/v1.3`。v1.2 descriptor 若加入這些欄位，schema 驗證會失敗。省略它們會保留原本的 borrow 路徑：不做 idle validation、不依 max-idle 或 max-lifetime 回收，也不設定 client heartbeat property。
 
-`att-mqhelper/v1.2` scalar descriptor 仍受支援。使用 `message.requestQueues` 或 `requestQueueSelection` 時，須改為 `att-mqhelper/v1.3`，並以 1–256 項不重複 queue 清單取代 scalar `requestQueue`；`replyQueue` 維持單一可選 scalar。Instance 路由覆寫會取代繼承的 scalar／清單，未明確指定 strategy 時重設 queue strategy。Queue selection、counter 範圍、evidence 及 replay 行為見 [MQHelper](../resources/mqhelper.md#request-queue-路由)。
+`att-mqhelper/v1.2` scalar descriptor 仍受支援。使用 `message.requestQueues` 或 `requestQueueSelection` 時，須改為 `att-mqhelper/v1.3`，並以 1–256 項不重複 queue 清單取代 scalar `requestQueue`；`replyQueue` 維持單一可選 scalar。Instance 路由覆寫會取代繼承的 scalar／清單，未明確指定 strategy 時重設 queue strategy。Queue selection、counter 範圍、evidence 及 replay 行為見 [MQHelper](../reference/resources/mqhelper.md)。
 
 
 ## File arguments 與 case log paths
@@ -71,7 +71,7 @@ Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader �
 
 歷史的 `att-load-profile/v1.0` policy file 僅供 migration 使用：使用前請改寫為現行 policy-only `att-load/v1.6` descriptor；它不是現行 `load/load.yaml` 範例。
 
-Unsupported schema version 會在 execution 前失敗並提供 migration guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部 resource。詳見[Action 與型別化值](../actions.md)、[Runtime 與 Context 模型](../runtime-context.md)、[Load 模式](../execution-modes/load.md)與[Schema 矩陣](schema-matrix.md)。
+Unsupported schema version 會在 execution 前失敗並提供 migration guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部 resource。詳見[Action 與型別化值](../reference/actions.md)、[Runtime 與 Context 模型](../reference/runtime-context.md)、[Load 模式](../reference/execution-modes/load.md)與[Schema 矩陣](schema-matrix.md)。
 
 ## Load mix migration
 
@@ -80,7 +80,7 @@ Unsupported schema version 會在 execution 前失敗並提供 migration guidanc
 <!-- att-docs:historical -->
 ## 歷史的集中式 SUT Metrics catalog
 
-Package-local SUT Metrics 遷移前，global config `att-config/v2.14` 可管理有界的 `sutMetrics.dataSources`、`metricSources`、`groups` 和 `profiles` lists；沒有 `sutMetrics` 的 `att-config/v2.13` 檔案仍受支援。遷移後，global `att-config/v2.15` 保留 Data Source 描述檔路徑，各 Package 則管理自己的 Metric Source、Group 和 Profile。請依照 [Package-local SUT Metrics migration guide](../../guides/sut-metrics-config-migration.zh.md) 操作。舊的 `data/sut-metrics-catalog.json` 不是 Package 定義的有效來源，也沒有自動 dry-run/apply 遷移命令；停用前請先與各定義擁有者明確協調及整理內容。
+Package-local SUT Metrics 遷移前，global config `att-config/v2.14` 可管理有界的 `sutMetrics.dataSources`、`metricSources`、`groups` 和 `profiles` lists；沒有 `sutMetrics` 的 `att-config/v2.13` 檔案仍受支援。遷移後，global `att-config/v2.15` 保留 Data Source 描述檔路徑，各 Package 則管理自己的 Metric Source、Group 和 Profile。請依照 [Package-local SUT Metrics migration guide](../guides/sut-metrics-config-migration.zh.md) 操作。舊的 `data/sut-metrics-catalog.json` 不是 Package 定義的有效來源，也沒有自動 dry-run/apply 遷移命令；停用前請先與各定義擁有者明確協調及整理內容。
 <!-- /att-docs:historical -->
 
 
@@ -105,15 +105,15 @@ File-content path 相對於 canonical package root。`./` 與 `../` 只有在 ca
 
 Unsupported schemaVersion 會在 execution 前由 validation 拒絕並提供 migration guidance。ATT 不會靜默轉換舊欄位，也不會為產生 guidance 而呼叫 Tools/resources。
 
-[META Runtime and Context Model](../runtime-context.md) 說明 META lifecycle；[Load Mode](../execution-modes/load.md) 說明 execution identity 和 retained evidence 路徑。
+[META Runtime and Context Model](../reference/runtime-context.md) 說明 META lifecycle；[Load Mode](../reference/execution-modes/load.md) 說明 execution identity 和 retained evidence 路徑。
 
 ## Debug schema migration
 
-`att-debug/v1.0` 及 `att-debug/v1.1` 為 historical schema；請升級至 `att-debug/v1.2`。Template/Flow 可配置 `vars` 以 seed `EXEC.VARS`；Tool 不支援 `vars`。現行 schema 亦允許 package-relative `testdata` imports，並限定在 standalone Debug invocation。Input 與 arguments 的現行規則見 [Debug](../execution-modes/debug.md)。
+`att-debug/v1.0` 及 `att-debug/v1.1` 為 historical schema；請升級至 `att-debug/v1.2`。Template/Flow 可配置 `vars` 以 seed `EXEC.VARS`；Tool 不支援 `vars`。現行 schema 亦允許 package-relative `testdata` imports，並限定在 standalone Debug invocation。Input 與 arguments 的現行規則見 [Debug](../reference/execution-modes/debug.md)。
 
 ## Environment profile migration
 
-從舊的 complete-config pattern 遷移時，保留 descriptor 與 Action，將 common settings 移至 `config/config.yaml`、各環境 descriptor lists 移至 `environments.<NAME>`，並以 `--config config/config.yaml --env <NAME>` 選擇環境。現行 contract 見 [Configuration](../configuration.md)。
+從舊的 complete-config pattern 遷移時，保留 descriptor 與 Action，將 common settings 移至 `config/config.yaml`、各環境 descriptor lists 移至 `environments.<NAME>`，並以 `--config config/config.yaml --env <NAME>` 選擇環境。現行 contract 見 [Configuration](../reference/configuration.md)。
 
 ## Load execution identity migration
 
@@ -127,4 +127,4 @@ ATT 為每個 started iteration 配置唯一的 engine-managed `EXEC.ID`：`<run
 
 ## Load v1.9 readiness 與 windowed metrics
 
-`att-load/v1.8` Load scenario 仍可載入，並會正規化為 `att-load/v1.9`。目前 Load 啟動只會在 scheduler 放行前準備被引用的 DB／MQ／HTTP helper；RUN 和 Debug 維持 lazy resource 行為。`att-load-summary/v1.2` 新增 optional resource-preparation 及 `windowMetrics` data，並保留既有 summary 欄位。Report 預設使用 steady window；`thresholds.steady` 和 `thresholds.overall` 可選擇 window scope。Window 沒有足夠的完成 evidence 時回報 `NOT_EVALUATED`，不能當作 pass。Resource 限制及 metric 定義見 [Load 模式](../execution-modes/load.md)。
+`att-load/v1.8` Load scenario 仍可載入，並會正規化為 `att-load/v1.9`。目前 Load 啟動只會在 scheduler 放行前準備被引用的 DB／MQ／HTTP helper；RUN 和 Debug 維持 lazy resource 行為。`att-load-summary/v1.2` 新增 optional resource-preparation 及 `windowMetrics` data，並保留既有 summary 欄位。Report 預設使用 steady window；`thresholds.steady` 和 `thresholds.overall` 可選擇 window scope。Window 沒有足夠的完成 evidence 時回報 `NOT_EVALUATED`，不能當作 pass。Resource 限制及 metric 定義見 [Load 模式](../reference/execution-modes/load.md)。

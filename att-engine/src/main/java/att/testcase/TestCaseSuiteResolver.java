@@ -40,6 +40,14 @@ public final class TestCaseSuiteResolver {
             Path templatesRoot, Path testcasesRoot, List<String> definitionIds,
             List<String> qualifiedCaseIds, List<String> tags, List<String> excludeTags,
             boolean all, BooleanSupplier cancellation) throws Exception {
+        return resolve(packageRoot, packageId, att.flow.PackageFlowRoots.DEFAULT_FLOW_ROOT, templatesRoot,
+                testcasesRoot, definitionIds, qualifiedCaseIds, tags, excludeTags, all, cancellation);
+    }
+
+    public TestCaseSuiteResolutionResult resolve(Path packageRoot, String packageId,
+            Path flowRoot, Path templatesRoot, Path testcasesRoot, List<String> definitionIds,
+            List<String> qualifiedCaseIds, List<String> tags, List<String> excludeTags,
+            boolean all, BooleanSupplier cancellation) throws Exception {
         List<String> definitionsInRequest = unique(definitionIds, "definitionIds", MAX_DEFINITIONS);
         if (definitionsInRequest.isEmpty()) throw invalid("At least one Definition ID is required");
         for (String id : definitionsInRequest) {
@@ -76,7 +84,7 @@ public final class TestCaseSuiteResolver {
         for (String definitionId : orderedDefinitions) {
             checkCancelled(cancellation);
             TestCaseResolutionResult result = definitions.resolveByDefinitionId(packageRoot, packageId,
-                    templatesRoot, testcasesRoot, definitionId,
+                    flowRoot, templatesRoot, testcasesRoot, definitionId,
                     new TestCaseDefinitionResolver.Options(TestCaseDefinitionResolver.MAX_RECORDS,
                             TestCaseDefinitionResolver.MAX_PREVIEW_CASES, null, cancellation));
             if (result.selectedCases().size() != result.selectedCount())
