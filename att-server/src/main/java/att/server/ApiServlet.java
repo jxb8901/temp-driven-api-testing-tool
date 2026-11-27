@@ -546,6 +546,7 @@ public final class ApiServlet extends HttpServlet {
           catch(PackageConfigurationPolicy.EnvironmentDeniedException e){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(e),requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The request could not be completed",requestId);getServletContext().log("ATT Server submission failed id="+requestId,e);}
+          catch(LinkageError e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The request could not be completed",requestId);getServletContext().log("ATT Server submission linkage failure id="+requestId,e);}
     }
 
     private void validationPost(HttpServletRequest req,HttpServletResponse res,String requestId,String actor)throws IOException {

@@ -682,7 +682,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,userMonitoring.statusCode(),userMonitoring.body());
             JsonNode monitoring=ServerRuntime.JSON.readTree(userMonitoring.body());
             assertEquals("att-monitoring/v1",monitoring.path("schemaVersion").asText());
-            assertEquals("4.6.0",monitoring.path("health").path("version").asText());
+            assertEquals("4.6.1",monitoring.path("health").path("version").asText());
             assertTrue(monitoring.path("workers").path("maxConcurrent").isIntegralNumber());
             assertTrue(monitoring.path("workers").path("activeLoadJobs").isIntegralNumber());
             assertTrue(monitoring.path("http").path("successfulRequests").isIntegralNumber());
@@ -1056,7 +1056,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,request(port,null));assertEquals(200,get(port,"/att/ui/index.html",null));
             assertEquals(200,get(port,"/att/ui/app.js",null));
             assertEquals(200,get(port,"/att/api/v1/health",null));
-            assertEquals("4.6.0",getJson(port,"/att/api/v1/version",null).path("version").asText());
+            assertEquals("4.6.1",getJson(port,"/att/api/v1/version",null).path("version").asText());
             JsonNode registry=getJson(port,"/att/api/v1/registry",null);
             assertEquals("att-package-registry/v1",registry.path("schemaVersion").asText());
             assertEquals("Ready",registry.path("status").asText());

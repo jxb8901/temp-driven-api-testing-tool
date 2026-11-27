@@ -369,7 +369,7 @@ public final class SourceCandidateValidator {
                 Collections.<String>emptySet(), Collections.<String>emptySet(), "", false,
                 false, false, false, null, "package", null, null, null,
                 false, null, null, null, null, null, null, null, null, null, null,
-                Collections.<String>emptyList());
+                Collections.<String>emptyList()).withCheckOutputWritability(false);
         return new PackageValidator(pkg, effective, configFile).validate(options);
     }
 

@@ -1,7 +1,7 @@
-# ATT v4.6.0 reference manual
+# ATT v4.6.1 reference manual
 
 Author: Jeffrey + ChatGPT
-Version: 4.6.0
+Version: 4.6.1
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -641,7 +641,7 @@ Use the expression form supported by each field. File-content content, Action de
 
 ### File-content expressions
 
-`&{path}` is a file-content expression. It reads exactly one statically addressed regular UTF-8 package resource and returns its String content. Bare names resolve from the package root; explicit `./` and `../` locators resolve from the referring descriptor directory. Resolution rejects absolute names, package escapes and symlink targets outside the package. It never infers or parses a document format, expands a glob or creates an output file. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace, glob syntax and dynamic locators fail validation. File content is not implicitly parsed as JSON, YAML or XML.
+`&{path}` is a file-content expression. It reads exactly one statically addressed regular UTF-8 package resource and returns its String content. Bare names resolve from the package root; explicit `./` and `../` locators resolve from the referring descriptor directory. Static validation, runtime-value validation, compiled File Expression plans and execution all bind that descriptor source directory for the current Template/Flow body, including nested Flow invocations that restore the caller's scope on return. Resolution rejects absolute names, package escapes and symlink targets outside the package. It never infers or parses a document format, expands a glob or creates an output file. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace, glob syntax and dynamic locators fail validation. File content is not implicitly parsed as JSON, YAML or XML.
 
 ### Argument result typing
 
@@ -2687,6 +2687,8 @@ Run `./att.sh validate --package` and start with the reported file and field. A 
 ### Validate Native inputs
 
 Package validation checks Definitions, Flows, Tools, Testdata, Runtime Configuration, registered schemas, and semantic references. It does not execute Tools, submit a Server Job, or start a LOAD scheduler. It is read-only and never creates authoring inputs.
+
+Studio and other immutable source-inspection paths validate Package configuration semantics without requiring the pinned revision or its configured relative `outputDirectory` to be writable. Local CLI `validate`/`run` and Server Job execution still check that the actual output destination has a writable ancestor; Server Jobs use their independently allocated Job output directory, not a path inside the immutable source tree.
 
 Use a selected-validation option for fast feedback on one Definition or resource target. Before sharing a Package or promoting a build, validate the whole Package and each selected Environment. The [Schema and Version Matrix](reference/appendices/schema-matrix.md) lists the contracts used by this release. Diagnostics retain the source file, field, and structured location; automation should use stable diagnostic codes rather than message text.
 

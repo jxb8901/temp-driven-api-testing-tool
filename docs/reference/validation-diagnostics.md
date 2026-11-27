@@ -8,6 +8,8 @@ Run `./att.sh validate --package` and start with the reported file and field. A 
 
 Package validation checks Definitions, Flows, Tools, Testdata, Runtime Configuration, registered schemas, and semantic references. It does not execute Tools, submit a Server Job, or start a LOAD scheduler. It is read-only and never creates authoring inputs.
 
+Studio and other immutable source-inspection paths validate Package configuration semantics without requiring the pinned revision or its configured relative `outputDirectory` to be writable. Local CLI `validate`/`run` and Server Job execution still check that the actual output destination has a writable ancestor; Server Jobs use their independently allocated Job output directory, not a path inside the immutable source tree.
+
 Use a selected-validation option for fast feedback on one Definition or resource target. Before sharing a Package or promoting a build, validate the whole Package and each selected Environment. The [Schema and Version Matrix](appendices/schema-matrix.md) lists the contracts used by this release. Diagnostics retain the source file, field, and structured location; automation should use stable diagnostic codes rather than message text.
 
 | Category | Typical cause | Corrective action |

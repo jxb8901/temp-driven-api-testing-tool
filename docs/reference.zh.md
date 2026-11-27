@@ -1,7 +1,7 @@
-# ATT v4.6.0 使用手冊與參考
+# ATT v4.6.1 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 4.6.0
+Version: 4.6.1
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -642,7 +642,7 @@ description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 
 ### File-content expression
 
-`&{path}` 是 file-content expression：它讀取 package resource 中一個靜態指定的 regular UTF-8 檔案，並回傳原始 String content。Bare name 從 package root 解析；明確 `./` 和 `../` locator 從引用 descriptor 的目錄解析。Resolver 會拒絕 absolute name、package escape，以及指向 package 外的 symlink。它不會推斷或解析文件格式、展開 glob 或建立 output file。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation 失敗。File content 不會自動解析為 JSON、YAML 或 XML。
+`&{path}` 是 file-content expression：它讀取 package resource 中一個靜態指定的 regular UTF-8 檔案，並回傳原始 String content。Bare name 從 package root 解析；明確 `./` 和 `../` locator 從引用 descriptor 的目錄解析。Static validation、runtime-value validation、compiled File Expression plan 與實際執行都會為目前 Template/Flow body 綁定該 descriptor source directory；巢狀 Flow 呼叫結束（含例外）時會還原呼叫端 scope。Resolver 會拒絕 absolute name、package escape，以及指向 package 外的 symlink。它不會推斷或解析文件格式、展開 glob 或建立 output file。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation 失敗。File content 不會自動解析為 JSON、YAML 或 XML。
 
 ### Argument 結果型別
 
@@ -2576,6 +2576,8 @@ Structured Case log entries 使用 YAML。ATT 會保留內嵌文字的 line endi
 ### 驗證 Native input
 
 Package validation 會檢查 Definition、Flow、Tool、Testdata、Runtime Configuration、已登記 schema 和 semantic reference。它不會執行 Tool、提交 Server Job 或啟動 LOAD scheduler。Validation 為唯讀，也不會建立 authoring input。
+
+Studio 及其他 immutable source inspection 路徑會驗證 Package 設定語意，不要求 pinned revision 或其相對 `outputDirectory` 可寫。本機 CLI `validate`/`run` 與 Server Job 執行仍會檢查實際 output 目的地是否有可寫 ancestor；Server Job 使用獨立配置的 Job output directory，不會寫入 immutable source tree。
 
 使用 selected-validation option 可快速檢查一個 Definition 或 Resource target。分享 Package 或升級 build 前，請驗證整個 Package 和每個所選 Environment。[Schema 和 Version Matrix](reference.zh/appendices/schema-matrix.md) 列出此 release 使用的契約。Diagnostic 會保留 source file、field 和結構化位置；automation 應使用穩定 diagnostic code，而非 message text。
 

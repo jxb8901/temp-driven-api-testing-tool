@@ -52,6 +52,8 @@ public final class ExecutionOptions {
     private final List<String> variableOverrides;
     private final ExecutionEventListener observer;
     private final ExecutionIdentitySeed identitySeed;
+    /** When false, package layout skips local output writability (Studio/source inspection). */
+    private final boolean checkOutputWritability;
 
     public ExecutionOptions(Path configPath, Path suitePath, Path suiteDirectory, Set<String> caseIds, Set<String> tags,
                             Set<String> excludeTags, String runId, boolean rerunFailed, boolean dryRun,
@@ -182,6 +184,7 @@ public final class ExecutionOptions {
         this.variableOverrides = Collections.unmodifiableList(new ArrayList<String>(variableOverrides));
         this.observer = observer;
         this.identitySeed = null;
+        this.checkOutputWritability = true;
     }
 
     private ExecutionOptions(ExecutionOptions source, ExecutionIdentitySeed identitySeed) {
@@ -222,6 +225,48 @@ public final class ExecutionOptions {
         this.variableOverrides = source.variableOverrides;
         this.observer = source.observer;
         this.identitySeed = identitySeed;
+        this.checkOutputWritability = source.checkOutputWritability;
+    }
+
+    private ExecutionOptions(ExecutionOptions source, boolean checkOutputWritability) {
+        this.command = source.command;
+        this.configPath = source.configPath;
+        this.environment = source.environment;
+        this.suitePaths = new ArrayList<Path>(source.suitePaths);
+        this.suiteDirectory = source.suiteDirectory;
+        this.caseIds = source.caseIds;
+        this.tags = source.tags;
+        this.excludeTags = source.excludeTags;
+        this.runId = source.runId;
+        this.all = source.all;
+        this.rerunFailed = source.rerunFailed;
+        this.dryRun = source.dryRun;
+        this.failFast = source.failFast;
+        this.outputDirectory = source.outputDirectory;
+        this.validationScope = source.validationScope;
+        this.ciOutputs = new LinkedHashSet<String>(source.ciOutputs);
+        this.concurrencyMode = source.concurrencyMode;
+        this.updateSnapshot = source.updateSnapshot;
+        this.profile = source.profile;
+        this.debugTargetType = source.debugTargetType;
+        this.debugTargetId = source.debugTargetId;
+        this.debugInput = source.debugInput;
+        this.inlineDebugInput = source.inlineDebugInput;
+        this.unsafeFailureDetails = source.unsafeFailureDetails;
+        this.loadScenario = source.loadScenario;
+        this.loadUsers = source.loadUsers;
+        this.loadArrivalRate = source.loadArrivalRate;
+        this.loadWarmup = source.loadWarmup;
+        this.loadRampUp = source.loadRampUp;
+        this.loadDuration = source.loadDuration;
+        this.loadRampDown = source.loadRampDown;
+        this.loadThinkTime = source.loadThinkTime;
+        this.loadMaxConcurrent = source.loadMaxConcurrent;
+        this.loadOverloadPolicy = source.loadOverloadPolicy;
+        this.variableOverrides = source.variableOverrides;
+        this.observer = source.observer;
+        this.identitySeed = source.identitySeed;
+        this.checkOutputWritability = checkOutputWritability;
     }
 
     /** Enables CLI presentation for a typed request while leaving the API default silent. */
@@ -231,7 +276,8 @@ public final class ExecutionOptions {
                 validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId,
                 debugInput, loadScenario, loadUsers, loadArrivalRate, loadWarmup, loadRampUp, loadDuration,
                 loadRampDown, loadThinkTime, loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides,
-                unsafeFailureDetails, listener).withInlineDebugInput(inlineDebugInput).withIdentitySeed(identitySeed);
+                unsafeFailureDetails, listener).withInlineDebugInput(inlineDebugInput).withIdentitySeed(identitySeed)
+                .withCheckOutputWritability(checkOutputWritability);
     }
 
     /** Freezes an exact, already validated execution identity for subsequent lifecycle phases. */
@@ -241,7 +287,17 @@ public final class ExecutionOptions {
                 concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId, debugInput,
                 loadScenario, loadUsers, loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown,
                 loadThinkTime, loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides,
-                unsafeFailureDetails, observer).withInlineDebugInput(inlineDebugInput).withIdentitySeed(identitySeed);
+                unsafeFailureDetails, observer).withInlineDebugInput(inlineDebugInput).withIdentitySeed(identitySeed)
+                .withCheckOutputWritability(checkOutputWritability);
+    }
+
+    /**
+     * Controls whether package-scope validation requires a writable output ancestor.
+     * Studio and immutable source inspection set this false; CLI/Job execution readiness keeps the default true.
+     */
+    public ExecutionOptions withCheckOutputWritability(boolean value) {
+        if (checkOutputWritability == value) return this;
+        return new ExecutionOptions(this, value);
     }
 
     public ExecutionOptions withIdentitySeed(ExecutionIdentitySeed value) {
@@ -292,6 +348,7 @@ public final class ExecutionOptions {
         this.variableOverrides = source.variableOverrides;
         this.observer = source.observer;
         this.identitySeed = identitySeed;
+        this.checkOutputWritability = source.checkOutputWritability;
     }
 
     private static Map<String, Object> immutableMap(Map<String, Object> source) {
@@ -366,7 +423,8 @@ public final class ExecutionOptions {
                 updateSnapshot, profileEnabled, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers,
                 loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime, loadMaxConcurrent,
                 loadOverloadPolicy, environment, variableOverrides, unsafeFailureDetails)
-                .withInlineDebugInput(inlineDebugInput).withIdentitySeed(identitySeed);
+                .withInlineDebugInput(inlineDebugInput).withIdentitySeed(identitySeed)
+                .withCheckOutputWritability(checkOutputWritability);
     }
 
     public String command() { return command; }
@@ -387,6 +445,8 @@ public final class ExecutionOptions {
     public boolean dryRun() { return dryRun; }
     public boolean failFast() { return failFast; }
     public Path outputDirectory() { return outputDirectory; }
+    /** True when package validation must verify a writable output ancestor (CLI/Job execution readiness). */
+    public boolean checkOutputWritability() { return checkOutputWritability; }
     public String validationScope() { return validationScope; }
     public Set<String> ciOutputs() { return Collections.unmodifiableSet(ciOutputs); }
     public String concurrencyMode() { return concurrencyMode; }

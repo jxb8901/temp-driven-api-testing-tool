@@ -2,7 +2,7 @@
 
 # Studio Read-only validation
 
-Studio 使用有界唯讀 Server validation，並顯示 `att-validation/v1` report。Configuration、Package Explorer 及 LOAD Scenario 的上下文 action 會建立持久非同步 record。`#/validate` 的進階 **Validate** 工作區仍保留同步 validation form，但已不再是側邊欄的頂層目的地；既有直接連結仍可使用。兩種流程都不會編輯 Config 或 Package file，也不會建立 RUN、LOAD、Debug draft、Job、Schedule 或已保存 snapshot。
+Studio 使用有界唯讀 Server validation，並顯示 `att-validation/v1` report。Configuration、Package Explorer 及 LOAD Scenario 的上下文 action 會建立持久非同步 record。`#/validate` 的進階 **Validate** 工作區仍保留同步 validation form，但已不再是側邊欄的頂層目的地；既有直接連結仍可使用。兩種流程都不會編輯 Config 或 Package file，也不會建立 RUN、LOAD、Debug draft、Job、Schedule 或已保存 snapshot。唯讀 validation 不要求 immutable Package revision 或其相對 `outputDirectory` 可寫；實際 Job/CLI output 目的地的執行就緒檢查維持獨立。
 
 ## 選擇範圍
 
