@@ -29,6 +29,24 @@ class ServerJobStorageTest {
             runtime.cleanupRequestedDeletions();assertFalse(runtime.store.jobRowExists(id));assertFalse(Files.exists(directory));
         }
     }
+
+    @Test void unavailableDeleteSurvivesHeldArtifactWriteLock() throws Exception {
+        try(ServerRuntime runtime=runtime("delete-archive-busy",null,Clock.systemUTC())) {
+            String id="J0000000000000790";
+            seed(runtime,id,"PASS",Instant.parse("2020-01-01T00:00:00Z"),false,mib(1));
+            assertEquals("MARKED",runtime.deleteJob(id,"operator").get("outcome"));
+            assertTrue(runtime.store.claimRequestedDeletion(id,Long.MAX_VALUE));
+            assertTrue(runtime.reconcileDeletingJobs());
+            assertFalse(runtime.store.jobRowExists(id));
+            var field=ServerRuntime.class.getDeclaredField("artifactLifecycle");
+            field.setAccessible(true);
+            var lock=(java.util.concurrent.locks.ReentrantReadWriteLock)field.get(runtime);
+            assertTrue(lock.writeLock().tryLock());
+            try {
+                assertEquals("ALREADY_UNAVAILABLE",runtime.deleteJob(id,"operator").get("outcome"));
+            } finally {lock.writeLock().unlock();}
+        }
+    }
     @Test void loadQueryFiltersBeforePaginationAndHonorsPrincipalAndPins() throws Exception {
         try (ServerRuntime runtime=runtime("load-query",null,Clock.systemUTC())) {
             Instant finished=Instant.parse("2026-01-01T00:00:00Z");

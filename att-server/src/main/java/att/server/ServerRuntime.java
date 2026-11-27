@@ -2056,14 +2056,23 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> setDeletionRequested(String id,boolean requested,String actor) throws Exception {
         if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
         if("local".equals(config.authMode)&&!store.isActiveUser(actor))throw new NotFoundException();
-        if(!artifactLifecycle.writeLock().tryLock())return deletionOutcome(id,actor,"ARCHIVE_BUSY");
+        // A fully removed Job needs no archive fence: mark/unmark cannot change retention state.
+        if(!store.jobRowExists(id))return deletionMarkOutcome(id,requested,actor);
+        if(!artifactLifecycle.writeLock().tryLock()) {
+            // Concurrent archive readers can hold the fence while reconcile finishes removing the row.
+            if(!store.jobRowExists(id))return deletionMarkOutcome(id,requested,actor);
+            return deletionOutcome(id,actor,"ARCHIVE_BUSY");
+        }
         try {
             if(requested&&(jobs.containsKey(id)||pendingArtifactJobs.contains(id)||store.workerMayBeAlive(id)))return deletionOutcome(id,actor,"JOB_BUSY");
-            String outcome=store.setDeletionRequested(id,requested,actor,System.currentTimeMillis());
-            Map<String,Object> response=new LinkedHashMap<>();response.put("jobId",id);response.put("outcome",outcome);
-            Map<String,Object> current=store.get(id);response.put("deletionState",current==null?null:current.get("deletionState"));
-            return response;
+            return deletionMarkOutcome(id,requested,actor);
         } finally {artifactLifecycle.writeLock().unlock();}
+    }
+    private Map<String,Object> deletionMarkOutcome(String id,boolean requested,String actor) throws Exception {
+        String outcome=store.setDeletionRequested(id,requested,actor,System.currentTimeMillis());
+        Map<String,Object> response=new LinkedHashMap<>();response.put("jobId",id);response.put("outcome",outcome);
+        Map<String,Object> current=store.get(id);response.put("deletionState",current==null?null:current.get("deletionState"));
+        return response;
     }
     /** Five-second bounded cadence, with at least thirty seconds to cancel a pending mark. */
     void cleanupRequestedDeletions() throws Exception {

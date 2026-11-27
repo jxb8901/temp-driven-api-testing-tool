@@ -1586,9 +1586,12 @@ class ServerWarUiIT {
 
     private static String apiStatusDiagnostic(JsonNode response,int status) {
         if(status<400)return "";
-        JsonNode error=response==null?ServerRuntime.JSON.getNodeFactory().nullNode():response.path("error");
+        JsonNode body=response==null?ServerRuntime.JSON.getNodeFactory().nullNode():response;
+        JsonNode error=body.path("error");
+        String outcome=body.path("outcome").asText("");
         return " (code="+error.path("code").asText("unknown")
-                +", summary="+error.path("summary").asText("unavailable")+")";
+                +", summary="+error.path("summary").asText("unavailable")
+                +(outcome.isEmpty()?"":", outcome="+outcome)+")";
     }
 
     private static int apiStatus(int port, String method, String path, String authorization, String origin, Object body) throws Exception {
