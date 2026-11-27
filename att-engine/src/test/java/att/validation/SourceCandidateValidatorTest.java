@@ -287,6 +287,54 @@ class SourceCandidateValidatorTest {
         assertEquals("files/selected.txt",restored.dependencies().get(0).logicalPath());
     }
 
+    @Test void selectedExecutionIgnoresUnrelatedMissingFileExpression() throws Exception {
+        write(firstPackage.resolve("files/selected.txt"),"selected source bytes\n");
+        Path selected=Files.createDirectories(firstPackage.resolve("templates/selected"));
+        write(selected.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: Selected\n"
+                +"description: Valid execution target\nactions:\n  read: {type: log, message: '&{../../files/selected.txt}'}\n");
+        Path nested=Files.createDirectories(firstPackage.resolve("flows/nested"));
+        write(nested.resolve("payload.xml"),"<ok/>\n");
+        write(nested.resolve("flow.yaml"),"schemaVersion: att-flow/v3.6\nid: selected.nested.v1\nname: Nested\n"
+                +"description: Reachable nested Flow\nactions:\n  body: {type: log, message: '&{./payload.xml}'}\n");
+        write(selected.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: Selected\n"
+                +"description: Valid execution target\nactions:\n"
+                +"  read: {type: log, message: '&{../../files/selected.txt}'}\n"
+                +"  nested: {type: flow, use: selected.nested.v1}\n");
+        Path broken=Files.createDirectories(firstPackage.resolve("flows/broken"));
+        write(broken.resolve("flow.yaml"),"schemaVersion: att-flow/v3.6\nid: unrelated.broken.v1\nname: Broken\n"
+                +"description: Unrelated missing File Expression\nactions:\n"
+                +"  missing: {type: log, message: '&{./does-not-exist.xml}'}\n");
+
+        SourceCandidateValidator.ExecutionFileRoot root=
+                new SourceCandidateValidator.ExecutionFileRoot("template","Selected");
+        EffectiveResolution selectedResolution=validator.resolveEffective("first","SIT",firstPackage,
+                configFile,runtimeRoot,revisions("first"),null,null,Collections.singletonList(root));
+        assertTrue(selectedResolution.complete,selectedResolution.diagnostics.toString());
+        assertTrue(selectedResolution.dependencies.stream().anyMatch(ref->ref.kind==DependencyKind.FILE
+                &&"files/selected.txt".equals(ref.canonicalPath)));
+        assertTrue(selectedResolution.dependencies.stream().anyMatch(ref->ref.kind==DependencyKind.FILE
+                &&"flows/nested/payload.xml".equals(ref.canonicalPath)));
+        assertTrue(selectedResolution.dependencies.stream().noneMatch(ref->ref.kind==DependencyKind.FILE
+                &&(String.valueOf(ref.logicalId).contains("does-not-exist")
+                ||String.valueOf(ref.canonicalPath).contains("does-not-exist"))),
+                selectedResolution.dependencies.toString());
+
+        byte[] compiled=validator.compileFileExpressionSnapshot(firstPackage,configFile,runtimeRoot,"SIT",
+                Collections.singletonList(root));
+        att.template.FileExpressionResolver.FileExpressionSnapshot restored=
+                att.template.FileExpressionResolver.FileExpressionSnapshot.restore(firstPackage,compiled);
+        assertTrue(restored.dependencies().stream().anyMatch(dep->"files/selected.txt".equals(dep.logicalPath())));
+        assertTrue(restored.dependencies().stream().anyMatch(dep->"flows/nested/payload.xml".equals(dep.logicalPath())));
+        assertTrue(restored.dependencies().stream().noneMatch(dep->dep.logicalPath()!=null
+                &&dep.logicalPath().contains("does-not-exist")));
+
+        assertThrows(Exception.class,()->validator.compileFileExpressionSnapshot(firstPackage,configFile,runtimeRoot,"SIT"),
+                "Whole-catalog capture must still fail closed on the unrelated missing File Expression");
+        CandidateValidation whole=validator.validatePackage(firstPackage,configFile,runtimeRoot,
+                "first",revisions("first"),FINGERPRINT);
+        assertNotEquals(ValidationState.VALID,whole.state,describe(whole));
+    }
+
     @Test void effectiveResolutionCapturesSelectedLoadTestdataOverlayAndDescriptorIdentity() throws Exception {
         Files.createDirectories(firstPackage.resolve("load"));
         write(firstPackage.resolve("testdata/scenario.yaml"),

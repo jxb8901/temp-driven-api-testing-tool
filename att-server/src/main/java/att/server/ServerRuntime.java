@@ -5452,10 +5452,13 @@ final class ServerRuntime implements AutoCloseable {
         String selectedLoadPath=request!=null&&request.scenario!=null?request.scenario:schedule==null?null:schedule.scenario;
         Map<String,Object> selectedLoadScenario=request!=null&&request.inlineLoadScenario!=null
                 ?request.inlineLoadScenario:schedule==null?null:schedule.inlineScenario;
+        java.util.Collection<att.validation.SourceCandidateValidator.ExecutionFileRoot> executionRoots=
+                executionFileRoots(request,schedule,packageSnapshot,selectedLoadPath,selectedLoadScenario);
+        att.validation.SourceCandidateValidator sourceValidator=new att.validation.SourceCandidateValidator();
         att.server.api.source.SourceManagementContracts.EffectiveResolution closure=
-                new att.validation.SourceCandidateValidator().resolveEffective(packageId,environment,packageSnapshot,
+                sourceValidator.resolveEffective(packageId,environment,packageSnapshot,
                         configurationSnapshot.sourceWorkerConfigPath,configurationSnapshot.sourceRoot,revisions,
-                        selectedLoadPath,selectedLoadScenario);
+                        selectedLoadPath,selectedLoadScenario,executionRoots);
         if(!closure.complete)throw new JobConflictException("ATT-SOURCE-CLOSURE-INCOMPLETE",
                 "The approved Package dependency closure could not be captured completely; validate the execution again.");
         List<Map<String,Object>> dependencies=JSON.convertValue(closure.dependencies,List.class);
@@ -5472,9 +5475,52 @@ final class ServerRuntime implements AutoCloseable {
             addSnapshotPath(logicalPaths,schedule.scenario);
             if(schedule.runInput!=null) addRequestPaths(logicalPaths,JSON.convertValue(schedule.runInput,WorkerRequest.class));
         }
-        byte[] compiledPlans=new att.validation.SourceCandidateValidator().compileFileExpressionSnapshot(
-                packageSnapshot,configurationSnapshot.sourceWorkerConfigPath,configurationSnapshot.sourceRoot,environment);
+        byte[] compiledPlans=sourceValidator.compileFileExpressionSnapshot(
+                packageSnapshot,configurationSnapshot.sourceWorkerConfigPath,configurationSnapshot.sourceRoot,environment,executionRoots);
         return jobSourceClosures.provenance(revisions,validationFingerprint,dependencies,List.copyOf(logicalPaths),compiledPlans);
+    }
+
+    /**
+     * Selected Template/Flow/Tool roots for Job File-expression plans. {@code null} keeps the
+     * historical whole-catalog walk for Native / Excel RUN paths that do not yet expose an
+     * explicit target; Functional Execution, Debug, Quick Load, and Load scenarios pass roots.
+     */
+    private static java.util.Collection<att.validation.SourceCandidateValidator.ExecutionFileRoot> executionFileRoots(
+            WorkerRequest request,LoadSchedule schedule,Path packageRoot,String loadScenarioPath,
+            Map<String,Object> inlineLoadScenario) throws Exception {
+        LinkedHashSet<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots=new LinkedHashSet<>();
+        addExecutionTarget(roots,request==null?null:request.target);
+        if(schedule!=null&&schedule.runInput!=null) {
+            WorkerRequest scheduled=JSON.convertValue(schedule.runInput,WorkerRequest.class);
+            addExecutionTarget(roots,scheduled==null?null:scheduled.target);
+        }
+        if(loadScenarioPath!=null&&!loadScenarioPath.isBlank()) {
+            att.resource.PackageResourceResolver.PackageResource source=new att.resource.PackageResourceResolver(packageRoot)
+                    .resolvePackageRelative(loadScenarioPath,att.resource.PackageResourceResolver.Kind.FILE);
+            addLoadScenarioRoots(roots,new att.load.LoadScenarioLoader(packageRoot).load(source.canonicalPath()));
+        }
+        if(inlineLoadScenario!=null) {
+            Map<String,Object> copy=att.load.LoadIsolation.deepCopyMap(inlineLoadScenario);
+            addLoadScenarioRoots(roots,new att.load.LoadScenarioLoader(packageRoot).loadInline(copy));
+        }
+        return roots.isEmpty()?null:roots;
+    }
+
+    private static void addLoadScenarioRoots(Set<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots,
+                                             att.load.LoadScenario scenario) {
+        if(scenario==null)return;
+        for(att.load.LoadWorkload workload:scenario.workloads())
+            roots.add(new att.validation.SourceCandidateValidator.ExecutionFileRoot(workload.targetType(),workload.targetId()));
+    }
+
+    private static void addExecutionTarget(Set<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots,
+                                           Map<String,Object> target) {
+        if(target==null)return;
+        Object type=target.get("type"),id=target.get("id");
+        if(!(type instanceof String)||!(id instanceof String))return;
+        String normalized=((String)type).trim().toLowerCase(java.util.Locale.ROOT);
+        if(!Set.of("template","flow","tool").contains(normalized))return;
+        roots.add(new att.validation.SourceCandidateValidator.ExecutionFileRoot(normalized,(String)id));
     }
 
     private JobSourceClosureStore.SourceProvenance jobSourceProvenance(String packageId,PackageRegistry.Snapshot registry,

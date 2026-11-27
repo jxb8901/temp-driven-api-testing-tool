@@ -53,6 +53,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -60,6 +61,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -120,7 +122,7 @@ public final class SourceCandidateValidator {
                 }
                 collectEffectiveBindings(pkg, packageId, environment, runtime, effective, dependencies);
                 complete &= validateLoadCandidates(pkg, packageId, environment, effective, dependencies, diagnostics);
-                collectFileDependencies(pkg, packageId, environment, effective, dependencies);
+                collectFileDependencies(pkg, packageId, environment, effective, dependencies, null);
                 collectPackageResourceDependencies(pkg, config, effective, packageId, environment, dependencies);
                 if (diagnostics.size() >= MAX_DIAGNOSTICS) {
                     complete = false;
@@ -211,6 +213,21 @@ public final class SourceCandidateValidator {
                                                 Path packageRoot, Path configFile, Path runtimeRoot,
                                                 RevisionSet provenance, String loadScenarioPath,
                                                 Map<String,Object> inlineLoadScenario) throws Exception {
+        return resolveEffective(packageId, environment, packageRoot, configFile, runtimeRoot, provenance,
+                loadScenarioPath, inlineLoadScenario, null);
+    }
+
+    /**
+     * Resolves the approved effective Package for Job/Schedule provenance.
+     * When {@code executionRoots} is non-null, FILE dependencies are limited to the selected
+     * Template/Flow/Tool closure (nested Flows included). Whole-Package validation and Config
+     * impact keep the catalog-wide walk by passing {@code null}.
+     */
+    public EffectiveResolution resolveEffective(String packageId, String environment,
+                                                Path packageRoot, Path configFile, Path runtimeRoot,
+                                                RevisionSet provenance, String loadScenarioPath,
+                                                Map<String,Object> inlineLoadScenario,
+                                                Collection<ExecutionFileRoot> executionRoots) throws Exception {
         Path pkg = canonicalDirectory(packageRoot, "Package source");
         Path config = canonicalFile(configFile, "Runtime Config source");
         Path runtime = canonicalDirectory(runtimeRoot, "Runtime Config root");
@@ -228,7 +245,7 @@ public final class SourceCandidateValidator {
         List<DependencyReference> bindings = new ArrayList<DependencyReference>();
         collectEffectiveBindings(pkg, packageId, selected, runtime, effective, bindings);
         collectManifestDependencies(pkg, packageId, bindings);
-        collectFileDependencies(pkg, packageId, selected, effective, bindings);
+        collectFileDependencies(pkg, packageId, selected, effective, bindings, executionRoots);
         collectPackageResourceDependencies(pkg, config, effective, packageId, selected, bindings);
         if(loadScenarioPath!=null&&!loadScenarioPath.trim().isEmpty()) {
             PackageResourceResolver.PackageResource source=new PackageResourceResolver(pkg)
@@ -326,40 +343,50 @@ public final class SourceCandidateValidator {
         }
     }
 
-    /** Captures the exact compiled File-expression plans for the selected effective Package view. */
+    /**
+     * Selected Template/Flow/Tool root for execution-scoped File Expression capture.
+     * Nested Flows reachable from the root remain part of the closure.
+     */
+    public static final class ExecutionFileRoot {
+        public final String type;
+        public final String id;
+        public ExecutionFileRoot(String type, String id) {
+            if (type == null || type.trim().isEmpty()) throw new IllegalArgumentException("Execution File root type is required");
+            if (id == null || id.trim().isEmpty()) throw new IllegalArgumentException("Execution File root id is required");
+            this.type = type.trim().toLowerCase(Locale.ROOT);
+            this.id = id.trim();
+        }
+        @Override public boolean equals(Object other) {
+            if (this == other) return true;
+            if (!(other instanceof ExecutionFileRoot)) return false;
+            ExecutionFileRoot that = (ExecutionFileRoot) other;
+            return type.equals(that.type) && id.equals(that.id);
+        }
+        @Override public int hashCode() { return Objects.hash(type, id); }
+    }
+
+    /** Captures compiled File-expression plans for the whole effective Package catalog. */
     public byte[] compileFileExpressionSnapshot(Path packageRoot, Path configFile, Path runtimeRoot,
                                                 String environment) throws Exception {
+        return compileFileExpressionSnapshot(packageRoot, configFile, runtimeRoot, environment, null);
+    }
+
+    /**
+     * Captures compiled File-expression plans. When {@code executionRoots} is non-null, only the
+     * selected Template/Flow/Tool closures are included (nested Flows via {@code snapshotFor}).
+     * Pass {@code null} for whole-catalog capture used by Package-wide tooling.
+     */
+    public byte[] compileFileExpressionSnapshot(Path packageRoot, Path configFile, Path runtimeRoot,
+                                                String environment,
+                                                Collection<ExecutionFileRoot> executionRoots) throws Exception {
         Path pkg = canonicalDirectory(packageRoot, "Package source");
         Path config = canonicalFile(configFile, "Runtime Config source");
         Path runtime = canonicalDirectory(runtimeRoot, "Runtime Config root");
         String selected = environment == null || environment.trim().isEmpty() ? "default" : environment.trim();
         FrameworkConfig effective = new FrameworkConfigLoader().loadDiscovery(config, runtime, pkg,
                 "default".equalsIgnoreCase(selected) ? null : selected);
-        FlowRegistry flows = new FlowRegistry(pkg, effective, false);
-        List<FileExpressionResolver.FileExpressionSnapshot> snapshots = new ArrayList<FileExpressionResolver.FileExpressionSnapshot>();
-        if (hasTemplateTree(pkg, effective.templatesRoot())) {
-            StageTemplateLoader templates = new StageTemplateLoader(pkg, effective.templatesRoot(), false);
-            for (String reference : templates.paths()) {
-                StageTemplate template;
-                try { template = templates.load(reference); }
-                catch (DiagnosticException invalidUnrelatedTemplate) {
-                    // Whole-Package validation owns invalid descriptors. Keep them out of this
-                    // execution snapshot so they do not block a separate valid target.
-                    continue;
-                }
-                snapshots.addAll(fileActionSnapshots(pkg, template, flows));
-            }
-        }
-        for (String flowId : flows.ids()) {
-            FlowDefinition flow;
-            try { flow = flows.get(flowId); }
-            catch (IllegalArgumentException invalidUnrelatedFlow) { continue; }
-            if (flow == null) continue;
-            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(),
-                    flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
-            snapshots.addAll(fileActionSnapshots(pkg, body, flows));
-        }
-        return FileExpressionResolver.FileExpressionSnapshot.merge(pkg, snapshots).serialize();
+        return FileExpressionResolver.FileExpressionSnapshot.merge(pkg,
+                fileExpressionSnapshots(pkg, effective, executionRoots)).serialize();
     }
 
     private static PackageValidator.ValidationSummary packageSummary(Path pkg, Path configFile,
@@ -647,9 +674,30 @@ public final class SourceCandidateValidator {
 
     private static void collectFileDependencies(Path packageRoot, String packageId, String environment,
                                                FrameworkConfig config,
-                                               List<DependencyReference> output) throws Exception {
-        FlowRegistry flows = new FlowRegistry(packageRoot, config, false);
+                                               List<DependencyReference> output,
+                                               Collection<ExecutionFileRoot> executionRoots) throws Exception {
         Map<String, DependencyReference> found = new LinkedHashMap<String, DependencyReference>();
+        for (FileExpressionResolver.FileExpressionSnapshot snapshot : fileExpressionSnapshots(
+                packageRoot, config, executionRoots))
+            collectFilePlans(packageRoot, packageId, environment, snapshot, found);
+        output.addAll(found.values());
+    }
+
+    /**
+     * {@code executionRoots == null} walks the whole catalog (Package validation / impact).
+     * A non-null collection limits capture to selected roots; nested Flows stay reachable via
+     * {@link FileExpressionResolver#snapshotFor}.
+     */
+    private static List<FileExpressionResolver.FileExpressionSnapshot> fileExpressionSnapshots(
+            Path packageRoot, FrameworkConfig config, Collection<ExecutionFileRoot> executionRoots) throws Exception {
+        FlowRegistry flows = new FlowRegistry(packageRoot, config, false);
+        List<FileExpressionResolver.FileExpressionSnapshot> snapshots =
+                new ArrayList<FileExpressionResolver.FileExpressionSnapshot>();
+        if (executionRoots != null) {
+            for (ExecutionFileRoot root : dedupeRoots(executionRoots))
+                snapshots.addAll(selectedRootSnapshots(packageRoot, config, flows, root));
+            return snapshots;
+        }
         if (hasTemplateTree(packageRoot, config.templatesRoot())) {
             StageTemplateLoader templates = new StageTemplateLoader(packageRoot, config.templatesRoot(), false);
             for (String reference : templates.paths()) {
@@ -660,9 +708,7 @@ public final class SourceCandidateValidator {
                     // Template is not part of another Job's immutable execution closure.
                     continue;
                 }
-                for (FileExpressionResolver.FileExpressionSnapshot snapshot : fileActionSnapshots(
-                        packageRoot, template, flows))
-                    collectFilePlans(packageRoot, packageId, environment, snapshot, found);
+                snapshots.addAll(fileActionSnapshots(packageRoot, template, flows));
             }
         }
         for (String flowId : flows.ids()) {
@@ -672,10 +718,38 @@ public final class SourceCandidateValidator {
             if (flow == null) continue;
             StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(),
                     flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
-            for (FileExpressionResolver.FileExpressionSnapshot snapshot : fileActionSnapshots(packageRoot, body, flows))
-                collectFilePlans(packageRoot, packageId, environment, snapshot, found);
+            snapshots.addAll(fileActionSnapshots(packageRoot, body, flows));
         }
-        output.addAll(found.values());
+        return snapshots;
+    }
+
+    private static Collection<ExecutionFileRoot> dedupeRoots(Collection<ExecutionFileRoot> roots) {
+        if (roots == null || roots.isEmpty()) return Collections.emptyList();
+        LinkedHashSet<ExecutionFileRoot> unique = new LinkedHashSet<ExecutionFileRoot>();
+        for (ExecutionFileRoot root : roots) if (root != null) unique.add(root);
+        return unique;
+    }
+
+    private static List<FileExpressionResolver.FileExpressionSnapshot> selectedRootSnapshots(
+            Path packageRoot, FrameworkConfig config, FlowRegistry flows, ExecutionFileRoot root) throws Exception {
+        if ("template".equals(root.type)) {
+            if (!hasTemplateTree(packageRoot, config.templatesRoot()))
+                throw new IllegalArgumentException("Unknown Template '" + root.id + "'");
+            StageTemplateLoader templates = new StageTemplateLoader(packageRoot, config.templatesRoot(), false);
+            return fileActionSnapshots(packageRoot, templates.loadSelected(root.id), flows);
+        }
+        if ("flow".equals(root.type)) {
+            FlowDefinition flow = flows.get(root.id);
+            if (flow == null) throw new IllegalArgumentException("Unknown Flow '" + root.id + "'");
+            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(),
+                    flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
+            return fileActionSnapshots(packageRoot, body, flows);
+        }
+        if ("tool".equals(root.type)) {
+            // Tool roots do not author descriptor-relative &{...} plans of their own.
+            return Collections.emptyList();
+        }
+        throw new IllegalArgumentException("Execution File root type must be template, flow, or tool");
     }
 
     private static List<FileExpressionResolver.FileExpressionSnapshot> fileActionSnapshots(

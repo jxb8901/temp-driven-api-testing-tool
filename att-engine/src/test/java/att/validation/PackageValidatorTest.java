@@ -783,8 +783,12 @@ class PackageValidatorTest {
                 || d.message().contains("schemas/catalog.yaml")), diagnostics.toString());
     }
 
-    @Test void sourceInspectionSkipsOutputWritabilityOnReadOnlyPackageRoot() throws Exception {
+    @Test void sourceInspectionSkipsOutputWritabilityWhenExecutionWouldFailClosed() throws Exception {
         Path root = Files.createDirectories(tempDir.resolve("immutable-source"));
+        // A regular file blocks the writable-ancestor walk without relying on POSIX mode bits,
+        // which remain writable for privileged/root processes and are not portable.
+        Path blocker = Files.writeString(root.resolve("blocker"), "not-a-directory");
+        Path blockedOutput = blocker.resolve("child/output");
         FrameworkConfig config = new FrameworkConfig(java.nio.file.Paths.get("output"), root.resolve("report"),
                 root.resolve("logs"), "SIT", 1000, root.resolve("templates"),
                 Collections.<String, ToolConfig>emptyMap(), null, null);
@@ -792,33 +796,21 @@ class PackageValidatorTest {
         java.lang.reflect.Method layout = PackageValidator.class.getDeclaredMethod("validatePackageLayout",
                 ExecutionOptions.class, List.class);
         layout.setAccessible(true);
-        java.util.Set<java.nio.file.attribute.PosixFilePermission> original = null;
-        try {
-            original = Files.getPosixFilePermissions(root);
-            java.util.Set<java.nio.file.attribute.PosixFilePermission> readOnly =
-                    java.util.EnumSet.copyOf(original);
-            readOnly.remove(java.nio.file.attribute.PosixFilePermission.OWNER_WRITE);
-            readOnly.remove(java.nio.file.attribute.PosixFilePermission.GROUP_WRITE);
-            readOnly.remove(java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE);
-            Files.setPosixFilePermissions(root, readOnly);
 
-            List<Diagnostic> sourceDiagnostics = new ArrayList<Diagnostic>();
-            ExecutionOptions sourceOptions = new ExecutionOptions(null, null, null, Collections.emptySet(),
-                    Collections.emptySet(), Collections.emptySet(), "source-layout", false, false, false, null)
-                    .withCheckOutputWritability(false);
-            layout.invoke(validator, sourceOptions, sourceDiagnostics);
-            assertFalse(sourceDiagnostics.stream().anyMatch(d -> DiagnosticCodes.PATH_INVALID.equals(d.code())
-                    && d.message().contains("writable ancestor")), sourceDiagnostics.toString());
+        List<Diagnostic> sourceDiagnostics = new ArrayList<Diagnostic>();
+        ExecutionOptions sourceOptions = new ExecutionOptions(null, null, null, Collections.emptySet(),
+                Collections.emptySet(), Collections.emptySet(), "source-layout", false, false, false, blockedOutput)
+                .withCheckOutputWritability(false);
+        layout.invoke(validator, sourceOptions, sourceDiagnostics);
+        assertFalse(sourceDiagnostics.stream().anyMatch(d -> DiagnosticCodes.PATH_INVALID.equals(d.code())
+                && d.message().contains("writable ancestor")), sourceDiagnostics.toString());
 
-            List<Diagnostic> executionDiagnostics = new ArrayList<Diagnostic>();
-            ExecutionOptions executionOptions = new ExecutionOptions(null, null, null, Collections.emptySet(),
-                    Collections.emptySet(), Collections.emptySet(), "execution-layout", false, false, false, null);
-            layout.invoke(validator, executionOptions, executionDiagnostics);
-            assertTrue(executionDiagnostics.stream().anyMatch(d -> DiagnosticCodes.PATH_INVALID.equals(d.code())
-                    && d.message().contains("writable ancestor")), executionDiagnostics.toString());
-        } finally {
-            if (original != null) Files.setPosixFilePermissions(root, original);
-        }
+        List<Diagnostic> executionDiagnostics = new ArrayList<Diagnostic>();
+        ExecutionOptions executionOptions = new ExecutionOptions(null, null, null, Collections.emptySet(),
+                Collections.emptySet(), Collections.emptySet(), "execution-layout", false, false, false, blockedOutput);
+        layout.invoke(validator, executionOptions, executionDiagnostics);
+        assertTrue(executionDiagnostics.stream().anyMatch(d -> DiagnosticCodes.PATH_INVALID.equals(d.code())
+                && d.message().contains("writable ancestor")), executionDiagnostics.toString());
     }
 
     @Test void runtimeValueValidationResolvesDescriptorRelativeFileExpressions() throws Exception {

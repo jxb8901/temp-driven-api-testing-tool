@@ -1050,12 +1050,18 @@ class ServerWarUiIT {
             assertFalse(archive.stream().map(JarEntry::getName).anyMatch(name ->
                     name.matches("WEB-INF/lib/att-(server-api|web|worker)-[^/]+\\.jar")),
                     "ATT Server API, Web, and Worker jars must be combined into the versioned att-server jar; Engine remains a runtime module dependency");
-            assertTrue(archive.stream().map(JarEntry::getName).anyMatch(name ->
-                            name.matches("WEB-INF/lib/poi-[0-9][^/]*\\.jar")),
-                    "Server WAR must ship Apache POI core for Job source-provenance Excel indexing");
+            JarEntry poiCore=archive.stream().filter(entry->entry.getName().matches("WEB-INF/lib/poi-[0-9][^/]*\\.jar"))
+                    .findFirst().orElse(null);
+            assertNotNull(poiCore,"Server WAR must ship Apache POI core for Job source-provenance Excel indexing");
             assertTrue(archive.stream().map(JarEntry::getName).anyMatch(name ->
                             name.matches("WEB-INF/lib/poi-ooxml-[0-9][^/]*\\.jar")),
                     "Server WAR must ship poi-ooxml for Package resource indexing during admission");
+            try(JarInputStream poi=new JarInputStream(archive.getInputStream(poiCore))) {
+                boolean dataFormatter=false;JarEntry entry;
+                while((entry=poi.getNextJarEntry())!=null)
+                    if("org/apache/poi/ss/usermodel/DataFormatter.class".equals(entry.getName())){dataFormatter=true;break;}
+                assertTrue(dataFormatter,"Packaged poi jar must contain DataFormatter for WAR-classloader Excel indexing");
+            }
             Set<String> entries = new HashSet<>();
             try (JarInputStream app = new JarInputStream(archive.getInputStream(application))) {
                 JarEntry entry;
