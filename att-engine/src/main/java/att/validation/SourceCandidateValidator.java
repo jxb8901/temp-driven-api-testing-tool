@@ -733,14 +733,23 @@ public final class SourceCandidateValidator {
     private static List<FileExpressionResolver.FileExpressionSnapshot> selectedRootSnapshots(
             Path packageRoot, FrameworkConfig config, FlowRegistry flows, ExecutionFileRoot root) throws Exception {
         if ("template".equals(root.type)) {
-            if (!hasTemplateTree(packageRoot, config.templatesRoot()))
-                throw new IllegalArgumentException("Unknown Template '" + root.id + "'");
+            if (!hasTemplateTree(packageRoot, config.templatesRoot())) return Collections.emptyList();
             StageTemplateLoader templates = new StageTemplateLoader(packageRoot, config.templatesRoot(), false);
-            return fileActionSnapshots(packageRoot, templates.loadSelected(root.id), flows);
+            StageTemplate template;
+            try { template = templates.loadSelected(root.id); }
+            catch (IllegalArgumentException unknownSelectedTemplate) {
+                // Unknown/invalid selected targets remain Worker/admission diagnostics. FILE-plan
+                // capture must not reject Job acceptance before that phase runs.
+                // DiagnosticException extends IllegalArgumentException.
+                return Collections.emptyList();
+            }
+            return fileActionSnapshots(packageRoot, template, flows);
         }
         if ("flow".equals(root.type)) {
-            FlowDefinition flow = flows.get(root.id);
-            if (flow == null) throw new IllegalArgumentException("Unknown Flow '" + root.id + "'");
+            FlowDefinition flow;
+            try { flow = flows.get(root.id); }
+            catch (IllegalArgumentException unknownSelectedFlow) { return Collections.emptyList(); }
+            if (flow == null) return Collections.emptyList();
             StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(),
                     flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
             return fileActionSnapshots(packageRoot, body, flows);
