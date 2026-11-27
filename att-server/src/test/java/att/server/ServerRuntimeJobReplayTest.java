@@ -1,5 +1,6 @@
 package att.server;
 
+import att.server.api.WorkerRequest;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletConfig;
@@ -22,6 +23,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -335,6 +337,92 @@ class ServerRuntimeJobReplayTest {
             String id=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(draft.get("draftId"))),"alice","alice").get("jobId"));
             await(runtime,id);
             assertEquals("PASS",runtime.jobRecord(id).get("status"),runtime.resultRecord(id).toString());
+        }
+    }
+
+    @Test void excelSuiteDiscoveryMatchesFrameworkEngineContract() throws Exception {
+        Fixture fixture=fixture();
+        Path nested=Files.createDirectories(fixture.root.resolve("testcase/nested/deep"));
+        Files.writeString(nested.resolve("orphan.xlsx"),"not-a-real-workbook");
+        Path withSidecar=Files.createDirectories(fixture.root.resolve("testcase/extra"));
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+            var out=Files.newOutputStream(withSidecar.resolve("extra.xlsx"))) {
+            var sheet=book.createSheet("Cases");var header=sheet.createRow(0);
+            header.createCell(0).setCellValue("ID");header.createCell(1).setCellValue("Tags");header.createCell(2).setCellValue("Template");
+            var row=sheet.createRow(1);row.createCell(0).setCellValue("X1");row.createCell(1).setCellValue("extra");
+            row.createCell(2).setCellValue("name: SIMPLE");book.write(out);
+        }
+        Files.writeString(withSidecar.resolve("extra.yaml"),"schemaVersion: att-sidecar/v2.2\nid: extra\nexcel:\n"
+                +"  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
+        ServerConfig serverConfig=ServerConfig.load(fixture.server);
+        att.config.FrameworkConfig framework=new att.config.FrameworkConfigLoader().loadDiscovery(
+                serverConfig.runtimeConfigPath,ServerConfig.runtimeConfigRoot(serverConfig.runtimeConfigPath),
+                fixture.root,"SIT");
+        WorkerRequest emptySuites=new WorkerRequest();
+        emptySuites.suites=List.of();
+        emptySuites.caseIds=List.of("cases.default.C1");
+        List<Path> discovered=ServerRuntime.excelSuiteWorkbooks(fixture.root,framework,emptySuites);
+        assertTrue(discovered.stream().anyMatch(path->path.toString().replace('\\','/').endsWith("testcase/cases.xlsx")),discovered.toString());
+        assertTrue(discovered.stream().anyMatch(path->path.toString().replace('\\','/').endsWith("testcase/extra/extra.xlsx")),discovered.toString());
+        assertTrue(discovered.stream().noneMatch(path->path.getFileName().toString().equals("orphan.xlsx")),
+                "Workbook files without sidecars are excluded like FrameworkEngine.suites()");
+
+        WorkerRequest explicit=new WorkerRequest();
+        explicit.suites=List.of("testcase/cases.xlsx");
+        explicit.caseIds=List.of("cases.default.C1");
+        List<Path> selected=ServerRuntime.excelSuiteWorkbooks(fixture.root,framework,explicit);
+        assertEquals(1,selected.size());
+        assertTrue(selected.get(0).toString().replace('\\','/').endsWith("testcase/cases.xlsx"));
+
+        WorkerRequest unsafe=new WorkerRequest();
+        unsafe.suites=List.of("../outside.xlsx");
+        assertThrows(att.validation.SourceCandidateValidator.UnresolvedExecutionRootException.class,
+                ()->ServerRuntime.excelSuiteWorkbooks(fixture.root,framework,unsafe));
+    }
+
+    @Test void nativeSuiteSourcePathsExcludeUnselectedDefinitions() {
+        WorkerRequest request=new WorkerRequest();
+        request.nativeSuiteQualifiedCaseIds=List.of("payments.C1","orders.group.C2");
+        request.nativeSuiteSourcePaths=Map.of(
+                "payments","testcase/payments/testcase.yaml",
+                "orders.group","testcase/orders/testcase.yaml",
+                "unused","testcase/unused/testcase.yaml");
+        assertEquals(Set.of("payments","orders.group"),ServerRuntime.selectedNativeSuiteDefinitions(request));
+    }
+
+    @Test void nativeRunSelectionIgnoresUnrelatedMissingFileExpression() throws Exception {
+        Fixture fixture=fixture();
+        Path broken=Files.createDirectories(fixture.root.resolve("flows/broken"));
+        Files.writeString(broken.resolve("flow.yaml"),"schemaVersion: att-flow/v3.6\nid: unrelated.broken.v1\nname: Broken\n"
+                +"description: Unrelated missing File Expression\nactions:\n"
+                +"  missing: {type: log, message: '&{./does-not-exist.xml}'}\n");
+        Path nativeCase=Files.createDirectories(fixture.root.resolve("testcase/native-simple"));
+        Files.writeString(nativeCase.resolve("testcase.yaml"),
+                "schemaVersion: att-testcase/v1\nid: native.simple\nname: Native simple\n"
+                        +"description: Selected Native Case\nflow: simple.flow.v1\n"
+                        +"dataSource:\n  type: inline\n  records: [{recordId: C1, data: {}}]\n");
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            var runDefinition=ServerRuntime.JSON.createObjectNode();
+            runDefinition.put("schemaVersion",RunDefinition.NATIVE_CASE_VERSION);runDefinition.put("executionType","run");
+            runDefinition.put("packageId","p");runDefinition.put("environment","SIT");
+            runDefinition.putObject("options").put("debug",false).put("failFast",false);
+            var target=runDefinition.putObject("target");
+            target.put("type","nativeCase");target.put("definitionId","native.simple");
+            target.putObject("selection").putArray("resolvedCaseIds").add("C1");
+            Map<String,Object> draft=runtime.createRunDraft(runDefinition,"alice");
+            String id=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(draft.get("draftId"))),"alice","alice").get("jobId"));
+            await(runtime,id);
+            assertEquals("PASS",runtime.jobRecord(id).get("status"),runtime.resultRecord(id).toString());
+            Map<?,?> provenance=(Map<?,?>)runtime.jobRecord(id).get("sourceProvenance");
+            assertTrue(((List<?>)provenance.get("dependencyClosure")).stream().filter(Map.class::isInstance)
+                    .map(value->(Map<?,?>)value)
+                    .anyMatch(value->"FILE".equals(String.valueOf(value.get("kind")))
+                            &&"files/value.txt".equals(String.valueOf(value.get("canonicalPath")))));
+            assertTrue(((List<?>)provenance.get("dependencyClosure")).stream().filter(Map.class::isInstance)
+                    .map(value->(Map<?,?>)value)
+                    .noneMatch(value->"FILE".equals(String.valueOf(value.get("kind")))
+                            &&String.valueOf(value.get("canonicalPath")).contains("does-not-exist")));
         }
     }
 

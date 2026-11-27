@@ -188,6 +188,100 @@ class ServerWarUiIT {
         }
     }
 
+    @Test void packagedWarSelectedClosureAndLocatorPinSurviveDraftAdmission() throws Exception {
+        Assumptions.assumeTrue(sourceSnapshotSandboxAvailable(),
+                "OS-enforced source snapshot sandbox is unavailable on this host");
+        Path war=Path.of(System.getProperty("att.server.war"));assertTrue(Files.isRegularFile(war));
+        Path home=createScheduledLocalRuntime();
+        Files.writeString(home.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+                +"environments: {SIT: {}}\ntestcase: {root: testcase}\ntemplates: {root: templates}\n");
+        Path allowed=Files.createDirectories(temp.resolve("closure-allowed"));
+        Path pkg=Files.createDirectories(allowed.resolve("closure"));
+        Files.createDirectories(pkg.resolve("files"));
+        Files.writeString(pkg.resolve("files/alpha.txt"),"alpha-payload\n");
+        Files.writeString(pkg.resolve("files/beta.txt"),"beta-payload\n");
+        Path nested=Files.createDirectories(pkg.resolve("templates/flows/nested"));
+        Files.writeString(nested.resolve("flow.yaml"),"schemaVersion: att-flow/v3.6\nid: nested.closure.v1\nname: Nested\n"
+                +"description: Nested Flow for packaged admission\nactions:\n"
+                +"  body: {type: log, message: '&{../../../files/alpha.txt}'}\n");
+        Path toolDir=Files.createDirectories(pkg.resolve("tools"));
+        Path toolScript=toolDir.resolve("echo-file.sh");
+        Files.writeString(toolScript,"#!/bin/sh\ncat \"$1\"\n");
+        toolScript.toFile().setExecutable(true);
+        Files.writeString(toolDir.resolve("echo-file.yaml"),
+                "schemaVersion: att-tool/v1\nid: echo-file\nname: EchoFile\ndescription: Quoted Tool file argument\n"
+                +"command: [./tools/echo-file.sh]\nstdoutFormat: text\narguments:\n  path: {type: string, required: true}\n");
+        Path template=Files.createDirectories(pkg.resolve("templates/CLOSURE"));
+        Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: CLOSURE\n"
+                +"description: Packaged selected File Expression closure\nactions:\n"
+                +"  read: {type: log, message: '&{../../files/alpha.txt}'}\n"
+                +"  nested: {type: flow, use: nested.closure.v1}\n"
+                +"  tool: {type: tool, call: \"#{echo-file(path='files/alpha.txt')}\"}\n");
+        Files.writeString(template.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        Files.createDirectories(pkg.resolve("testcase"));
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+            var out=Files.newOutputStream(pkg.resolve("testcase/closure.xlsx"))) {
+            var sheet=book.createSheet("Cases");var header=sheet.createRow(0);
+            header.createCell(0).setCellValue("ID");header.createCell(1).setCellValue("Tags");header.createCell(2).setCellValue("Template");
+            var row=sheet.createRow(1);row.createCell(0).setCellValue("C1");row.createCell(1).setCellValue("smoke");
+            row.createCell(2).setCellValue("name: CLOSURE");book.write(out);
+        }
+        Files.writeString(pkg.resolve("testcase/closure.yaml"),"schemaVersion: att-sidecar/v2.2\nid: closure\nexcel:\n"
+                +"  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
+        Files.writeString(pkg.resolve("package.yaml"),"schemaVersion: att-package/v1\n");
+        copySchemas(pkg);
+        new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(pkg,home.resolve("config/config.yaml"),
+                "SIT",List.of(Path.of("testcase/closure.xlsx")),null,Set.of(),false));
+        Path users=Files.writeString(temp.resolve("closure-users.xml"),
+                "<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
+        Path config=Files.writeString(temp.resolve("closure-server.yaml"),"server:\n  runtimeConfigPath: "+yaml(home.resolve("config/config.yaml"))
+                +"\n  dataDir: "+yaml(temp.resolve("closure-data"))+"\n  javaExecutable: "+yaml(Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java"))
+                +"\n  authenticationRequired: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\npackages:\n  allowedRoots: ["
+                +yaml(allowed)+"]\n  entries: {closure: "+yaml(pkg)+"}\n");
+        String oldConfig=System.getProperty("att.server.config"),oldHome=System.getProperty("att.home");
+        System.setProperty("att.server.config",config.toString());System.setProperty("att.home",home.toString());
+        Tomcat tomcat=new Tomcat();tomcat.setBaseDir(temp.resolve("closure-tomcat").toString());tomcat.setPort(0);tomcat.getConnector();
+        MemoryRealm realm=new MemoryRealm();realm.setPathname(users.toString());tomcat.getEngine().setRealm(realm);
+        ((StandardHost)tomcat.getHost()).setUnpackWARs(false);tomcat.addWebapp("/att",war.toString());
+        try {
+            tomcat.start();int port=tomcat.getConnector().getLocalPort();String origin="http://127.0.0.1:"+port,api="/att/api/v1",auth=basic("att");
+            Map<String,Object> excelDefinition=Map.of("schemaVersion","att-execution/v1","executionType","run","packageId","closure",
+                    "environment","SIT","selection",Map.of("caseIds",List.of("closure.default.C1"),"suites",List.of("testcase/closure.xlsx")),
+                    "options",Map.of("debug",false,"failFast",false));
+            JsonNode draft=apiJsonResponse(port,"POST",api+"/drafts/run",auth,origin,excelDefinition,201);
+            JsonNode accepted=apiJsonResponse(port,"POST",api+"/jobs/run",auth,origin,
+                    Map.of("packageId","closure","draftId",draft.path("draftId").asText()),202);
+            String firstId=accepted.path("jobId").asText();
+            JsonNode firstJob=awaitJobStatus(port,api+"/jobs/"+firstId,auth,"PASS");
+            assertEquals(Boolean.TRUE,firstJob.path("sourceSnapshotAvailable").asBoolean(false),firstJob.toString());
+            String firstProvenance=firstJob.path("sourceProvenance").toString();
+            assertTrue(firstProvenance.contains("files/alpha.txt"),firstProvenance);
+            assertFalse(firstProvenance.contains("files/beta.txt"),firstProvenance);
+            assertTrue(Files.isDirectory(ServerConfig.load(config).dataDir.resolve("jobs").resolve(firstId).resolve("output")),
+                    "Accepted Job output remains independently writable under Server dataDir");
+
+            Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: CLOSURE\n"
+                    +"description: Locator B after publication\nactions:\n"
+                    +"  read: {type: log, message: '&{../../files/beta.txt}'}\n"
+                    +"  nested: {type: flow, use: nested.closure.v1}\n"
+                    +"  tool: {type: tool, call: \"#{echo-file(path='files/beta.txt')}\"}\n");
+            JsonNode revalidated=apiJsonResponse(port,"POST",api+"/drafts/run",auth,origin,excelDefinition,201);
+            JsonNode second=apiJsonResponse(port,"POST",api+"/jobs/run",auth,origin,
+                    Map.of("packageId","closure","draftId",revalidated.path("draftId").asText()),202);
+            String secondId=second.path("jobId").asText();
+            JsonNode secondJob=awaitJobStatus(port,api+"/jobs/"+secondId,auth,"PASS");
+            String secondProvenance=secondJob.path("sourceProvenance").toString();
+            assertTrue(secondProvenance.contains("files/beta.txt"),secondProvenance);
+            assertEquals(firstProvenance,getJson(port,api+"/jobs/"+firstId,auth).path("sourceProvenance").toString(),
+                    "Accepted Job keeps locator A provenance after the authored descriptor moves to locator B");
+        } finally {
+            try {tomcat.stop();tomcat.destroy();} catch(Exception ignored) {}
+            if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);
+            if(oldHome==null)System.clearProperty("att.home");else System.setProperty("att.home",oldHome);
+        }
+    }
+
     private boolean sourceSnapshotSandboxAvailable() throws Exception {
         Path source=Files.createDirectories(temp.resolve("sandbox-probe/source/package"));
         Path snapshot=source.getParent();
