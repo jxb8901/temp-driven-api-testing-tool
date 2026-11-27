@@ -1,8 +1,8 @@
-<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.1 status=unpublished legacy-code-line=4.3.1 -->
 
 # Documentation architecture and truth matrix
 
-本頁記錄 ATT 4.6.0 release target 的文件 owner、feature/interface availability 及 migration 決策。尚未發佈正式 4.6.0 release 或 tag；4.3.1 只用來標識較早的 CLI code line，並非已核實的 GitHub Release。產品 capability 會區分開啟中的目標 stack implementation 與部署驗收；未完成或未核實的 acceptance 仍標示為 Pending。
+本頁記錄 ATT 4.6.1 release target 的文件 owner、feature/interface availability 及 migration 決策。尚未發佈正式 4.6.0 release 或 tag；4.3.1 只用來標識較早的 CLI code line，並非已核實的 GitHub Release。產品 capability 會區分開啟中的目標 stack implementation 與部署驗收；未完成或未核實的 acceptance 仍標示為 Pending。
 
 ## Inventory 與 link impact
 
@@ -17,7 +17,7 @@ Documentation release gate 會檢查目前 entry point、配對 source module、
 
 ## Feature、interface 及 availability matrix
 
-| Capability | ATT 4.6.0 目標 Local CLI | ATT Remote 相容 CLI | Studio 及 REST | Engine 或 Server | Status |
+| Capability | ATT 4.6.1 目標 Local CLI | ATT Remote 相容 CLI | Studio 及 REST | Engine 或 Server | Status |
 |---|---|---|---|---|---|
 | Legacy Workbook Case execution | `./att.sh run` 選擇 workbook Case | `att remote run` 提交舊版 Server 工作 | 現有 Case 和 batch route 繼續可用 | Engine 執行 legacy Case adapter | 保留相容行為 |
 | Native Case 和 implicit Suite RUN | 目標 CLI 提供 `run native-case` 和 `run native-suite` | `att remote` 保留舊版行為；目標 CLI 的 `--server` 路徑使用已驗證 Native draft | 目標 stack 已有 Native authoring、preview 和 RUN draft flow | Engine 解析及執行選取的 Case；Server 驗證 `att-execution/v2` draft 並擁有 Job | 已在目標 stack 實作；部署驗收待完成 |

@@ -1,8 +1,8 @@
-<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.1 status=unpublished legacy-code-line=4.3.1 -->
 
 # Documentation architecture and truth matrix
 
-This page records documentation owners, feature/interface availability and migration decisions against the ATT 4.6.0 release target. No formal 4.6.0 release or tag has been published; 4.3.1 identifies the prior CLI code line and is not a verified GitHub Release. Product claims distinguish implementation in the open target stack from deployed acceptance. Open or unverified acceptance remains Pending.
+This page records documentation owners, feature/interface availability and migration decisions against the ATT 4.6.1 release target. No formal 4.6.0 release or tag has been published; 4.3.1 identifies the prior CLI code line and is not a verified GitHub Release. Product claims distinguish implementation in the open target stack from deployed acceptance. Open or unverified acceptance remains Pending.
 
 ## Inventory and link impact
 
@@ -17,7 +17,7 @@ The documentation release gate checks local links and anchors from current entry
 
 ## Feature, interface and availability matrix
 
-| Capability | ATT 4.6.0 target Local CLI | ATT Remote compatibility CLI | Studio and REST | Engine or Server | Status |
+| Capability | ATT 4.6.1 target Local CLI | ATT Remote compatibility CLI | Studio and REST | Engine or Server | Status |
 |---|---|---|---|---|---|
 | Legacy Workbook Case execution | `./att.sh run` selects workbook Cases | `att remote run` submits legacy Server work | Existing Case and batch routes remain available | Engine executes the legacy Case adapter | Compatibility behavior retained |
 | Native Case and implicit Suite RUN | Target CLI exposes `run native-case` and `run native-suite` | `att remote` remains legacy; the target CLI's `--server` path requires validated Native drafts | Native authoring, preview and RUN draft flows are present in the target stack | Engine resolves/runs selected Cases; Server validates `att-execution/v2` drafts and owns Jobs | Implemented in target stack; deployed acceptance pending |

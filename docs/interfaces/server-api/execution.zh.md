@@ -1,10 +1,10 @@
-<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.1 status=unpublished legacy-code-line=4.3.1 -->
 
 # RUN 與 LOAD API
 
 ## Native Test Case 和 Suite RUN（att-execution/v2）
 
-此 contract 納入尚未發佈的 ATT 4.6.0 正式 release target。4.6.0 release 和 tag 尚未發佈。[#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) 的 Native RUN 驗收已關閉；關閉該 issue 並不是已發佈的 release。只應在 Server 宣告支援 `att-execution/v2` 時使用。Native inline Test Case 使用明確的 `nativeCase` target。`definitionId` 指向 Package 已設定的 Test Case root（預設為 `testcase/`）內的 Definition；`resolvedCaseIds` 則包含一個或多個不重複的 local Case ID（最多 1,000 個）。Server 會在 draft 中解析並驗證精確選取結果。不要把 Native Case 欄位直接提交至 `/jobs/run`，也不要將 local ID 轉成舊 Workbook `caseIds`。
+此 contract 納入尚未發佈的 ATT 4.6.1 正式 release target。4.6.0 release 和 tag 尚未發佈。[#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) 的 Native RUN 驗收已關閉；關閉該 issue 並不是已發佈的 release。只應在 Server 宣告支援 `att-execution/v2` 時使用。Native inline Test Case 使用明確的 `nativeCase` target。`definitionId` 指向 Package 已設定的 Test Case root（預設為 `testcase/`）內的 Definition；`resolvedCaseIds` 則包含一個或多個不重複的 local Case ID（最多 1,000 個）。Server 會在 draft 中解析並驗證精確選取結果。不要把 Native Case 欄位直接提交至 `/jobs/run`，也不要將 local ID 轉成舊 Workbook `caseIds`。
 
 建立已驗證的 draft：
 

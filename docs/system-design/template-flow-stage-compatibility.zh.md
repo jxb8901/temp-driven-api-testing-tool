@@ -2,7 +2,7 @@
 
 - **狀態：** 相容性分析及聚焦 golden fixture；尚未成為已接受的替代契約。
 - **範圍：** 現有 Workbook／Sidecar Stage 執行與透過單一 Flow 執行 Native Case 的比較。
-- **版本線：** ATT 4.6.0 發佈目標；release 和 tag 尚未發佈。
+- **版本線：** ATT 4.6.1 發佈目標；release 和 tag 尚未發佈。
 - **Runtime 變更：** 本階段沒有。Golden fixture 使用現有公開 API，記錄已觀察到的差異。
 - **驗收狀態：** S10 仍是相容性分析基線，並非已接受的替代契約。Native RUN 驗收（[#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)）已關閉，且不是已發佈的 4.6.0 release。報告驗收（[#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)）及 Default Package 採納（[#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413)）仍然開啟。共享編輯器部署證據由獨立的 [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387) 跟進。
 - **相關文件：** [Issue #398](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/398)、[ADR-0001](../adr/0001-flow-centric-testcase-resolution.md)、[English](template-flow-stage-compatibility.md)。
