@@ -193,6 +193,7 @@ class ServerWarUiIT {
                 "OS-enforced source snapshot sandbox is unavailable on this host");
         Path war=Path.of(System.getProperty("att.server.war"));assertTrue(Files.isRegularFile(war));
         Path home=createScheduledLocalRuntime();
+        Files.createDirectories(home.resolve("config"));
         Files.writeString(home.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments: {SIT: {}}\ntestcase: {root: testcase}\ntemplates: {root: templates}\n");
         Path allowed=Files.createDirectories(temp.resolve("closure-allowed"));
