@@ -287,6 +287,74 @@ class SourceCandidateValidatorTest {
         assertEquals("files/selected.txt",restored.dependencies().get(0).logicalPath());
     }
 
+    @Test void compiledPlansPinAuthoredLocatorAcrossDescriptorEdit() throws Exception {
+        write(firstPackage.resolve("files/alpha.txt"),"alpha\n");
+        write(firstPackage.resolve("files/beta.txt"),"beta\n");
+        Path selected=Files.createDirectories(firstPackage.resolve("templates/locator"));
+        write(selected.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: Locator\n"
+                +"description: Locator A\nactions:\n  read: {type: log, message: '&{../../files/alpha.txt}'}\n");
+        SourceCandidateValidator.ExecutionFileRoot root=
+                new SourceCandidateValidator.ExecutionFileRoot("template","Locator");
+        byte[] accepted=validator.compileFileExpressionSnapshot(firstPackage,configFile,runtimeRoot,"SIT",
+                Collections.singletonList(root));
+        att.template.FileExpressionResolver.FileExpressionSnapshot pinned=
+                att.template.FileExpressionResolver.FileExpressionSnapshot.restore(firstPackage,accepted);
+        assertEquals(1,pinned.dependencies().size());
+        assertEquals("files/alpha.txt",pinned.dependencies().get(0).logicalPath());
+
+        write(selected.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: Locator\n"
+                +"description: Locator B\nactions:\n  read: {type: log, message: '&{../../files/beta.txt}'}\n");
+        byte[] revalidated=validator.compileFileExpressionSnapshot(firstPackage,configFile,runtimeRoot,"SIT",
+                Collections.singletonList(root));
+        att.template.FileExpressionResolver.FileExpressionSnapshot current=
+                att.template.FileExpressionResolver.FileExpressionSnapshot.restore(firstPackage,revalidated);
+        assertEquals("files/beta.txt",current.dependencies().get(0).logicalPath());
+
+        att.template.FileExpressionResolver.FileExpressionSnapshot stillPinned=
+                att.template.FileExpressionResolver.FileExpressionSnapshot.restore(firstPackage,accepted);
+        assertEquals("files/alpha.txt",stillPinned.dependencies().get(0).logicalPath(),
+                "Accepted compiled plans keep locator A after the authored descriptor moves to locator B");
+    }
+
+    @Test void missingSelectedRootFailsClosedAndDiffersFromZeroFileExpressions() throws Exception {
+        Path empty=Files.createDirectories(firstPackage.resolve("templates/empty"));
+        write(empty.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: Empty\n"
+                +"description: Resolved root with no File Expressions\nactions:\n  show: {type: log, message: ok}\n");
+        SourceCandidateValidator.ExecutionFileRoot emptyRoot=
+                new SourceCandidateValidator.ExecutionFileRoot("template","Empty");
+        byte[] emptyPlans=validator.compileFileExpressionSnapshot(firstPackage,configFile,runtimeRoot,"SIT",
+                Collections.singletonList(emptyRoot));
+        assertEquals(0,att.template.FileExpressionResolver.FileExpressionSnapshot.restore(firstPackage,emptyPlans)
+                .dependencies().size());
+
+        SourceCandidateValidator.ExecutionFileRoot missing=
+                new SourceCandidateValidator.ExecutionFileRoot("template","DoesNotExist");
+        SourceCandidateValidator.UnresolvedExecutionRootException unresolved=assertThrows(
+                SourceCandidateValidator.UnresolvedExecutionRootException.class,
+                ()->validator.compileFileExpressionSnapshot(firstPackage,configFile,runtimeRoot,"SIT",
+                        Collections.singletonList(missing)));
+        assertEquals("template",unresolved.rootType);
+        assertEquals("DoesNotExist",unresolved.rootId);
+
+        SourceCandidateValidator.ExecutionFileRoot byPath=
+                new SourceCandidateValidator.ExecutionFileRoot("template","empty");
+        byte[] aliasPlans=validator.compileFileExpressionSnapshot(firstPackage,configFile,runtimeRoot,"SIT",
+                Collections.singletonList(byPath));
+        assertEquals(0,att.template.FileExpressionResolver.FileExpressionSnapshot.restore(firstPackage,aliasPlans)
+                .dependencies().size(),"Canonical path and symbolic name resolve the same Template root");
+
+        Path nestedMissing=Files.createDirectories(firstPackage.resolve("flows/nested-missing"));
+        write(nestedMissing.resolve("flow.yaml"),"schemaVersion: att-flow/v3.6\nid: nested.missing.v1\nname: NestedMissing\n"
+                +"description: Nested required Flow that is incomplete\nactions:\n"
+                +"  missing: {type: log, message: '&{./gone.xml}'}\n");
+        write(empty.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: Empty\n"
+                +"description: Calls a nested Flow with a missing File Expression\nactions:\n"
+                +"  nested: {type: flow, use: nested.missing.v1}\n");
+        assertThrows(Exception.class,()->validator.compileFileExpressionSnapshot(firstPackage,configFile,runtimeRoot,"SIT",
+                Collections.singletonList(emptyRoot)),
+                "Nested required Flow File Expression failures fail closed for the selected root");
+    }
+
     @Test void selectedExecutionIgnoresUnrelatedMissingFileExpression() throws Exception {
         write(firstPackage.resolve("files/selected.txt"),"selected source bytes\n");
         Path selected=Files.createDirectories(firstPackage.resolve("templates/selected"));

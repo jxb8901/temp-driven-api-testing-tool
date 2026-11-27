@@ -365,6 +365,20 @@ public final class SourceCandidateValidator {
         @Override public int hashCode() { return Objects.hash(type, id); }
     }
 
+    /**
+     * Selected Template/Flow root could not be resolved to a canonical descriptor. Distinct from a
+     * resolved root that simply authors zero File Expressions.
+     */
+    public static final class UnresolvedExecutionRootException extends IllegalArgumentException {
+        public final String rootType;
+        public final String rootId;
+        public UnresolvedExecutionRootException(String rootType, String rootId, String detail) {
+            super(detail);
+            this.rootType = rootType;
+            this.rootId = rootId;
+        }
+    }
+
     /** Captures compiled File-expression plans for the whole effective Package catalog. */
     public byte[] compileFileExpressionSnapshot(Path packageRoot, Path configFile, Path runtimeRoot,
                                                 String environment) throws Exception {
@@ -733,23 +747,29 @@ public final class SourceCandidateValidator {
     private static List<FileExpressionResolver.FileExpressionSnapshot> selectedRootSnapshots(
             Path packageRoot, FrameworkConfig config, FlowRegistry flows, ExecutionFileRoot root) throws Exception {
         if ("template".equals(root.type)) {
-            if (!hasTemplateTree(packageRoot, config.templatesRoot())) return Collections.emptyList();
+            if (!hasTemplateTree(packageRoot, config.templatesRoot()))
+                throw new UnresolvedExecutionRootException("template", root.id,
+                        "Unknown Template '" + root.id + "'");
             StageTemplateLoader templates = new StageTemplateLoader(packageRoot, config.templatesRoot(), false);
             StageTemplate template;
             try { template = templates.loadSelected(root.id); }
             catch (IllegalArgumentException unknownSelectedTemplate) {
-                // Unknown/invalid selected targets remain Worker/admission diagnostics. FILE-plan
-                // capture must not reject Job acceptance before that phase runs.
-                // DiagnosticException extends IllegalArgumentException.
-                return Collections.emptyList();
+                throw new UnresolvedExecutionRootException("template", root.id,
+                        "Unknown Template '" + root.id + "'");
             }
+            // Resolved Template with zero &{...} authors returns an empty snapshot list intentionally.
             return fileActionSnapshots(packageRoot, template, flows);
         }
         if ("flow".equals(root.type)) {
             FlowDefinition flow;
             try { flow = flows.get(root.id); }
-            catch (IllegalArgumentException unknownSelectedFlow) { return Collections.emptyList(); }
-            if (flow == null) return Collections.emptyList();
+            catch (IllegalArgumentException unknownSelectedFlow) {
+                throw new UnresolvedExecutionRootException("flow", root.id,
+                        "Unknown Flow '" + root.id + "'");
+            }
+            if (flow == null)
+                throw new UnresolvedExecutionRootException("flow", root.id,
+                        "Unknown Flow '" + root.id + "'");
             StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(),
                     flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
             return fileActionSnapshots(packageRoot, body, flows);

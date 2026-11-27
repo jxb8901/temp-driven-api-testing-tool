@@ -234,16 +234,16 @@ class ServerRuntimeJobReplayTest {
         List<?> dependencies=(List<?>)provenance.get("dependencyClosure");assertNotNull(dependencies);
         List<? extends Map<?,?>> plans=dependencies.stream().filter(Map.class::isInstance).map(value->(Map<?,?>)value)
                 .filter(value->"FILE".equals(String.valueOf(value.get("kind")))).toList();
-        // Selected-execution provenance keeps only callers reachable from the Job target.
-        // Unrelated Template/Flow File Expressions remain Package-validation concerns.
-        assertFalse(plans.isEmpty(),"Selected execution retains its reachable File Expression callers");
-        assertEquals(1,plans.stream().map(value->value.get("canonicalPath")).distinct().count(),
-                "Shared callers retain one canonical File identity");
-        assertTrue(plans.stream().allMatch(value->"files/value.txt".equals(value.get("canonicalPath"))));
+        // Selected SNAPSHOT execution must keep its own call site and exclude the unrelated Flow caller.
+        assertEquals(1,plans.size(),"Selected SNAPSHOT execution retains exactly one File Expression caller");
+        assertEquals("files/value.txt",plans.get(0).get("canonicalPath"));
         assertEquals(1,plans.stream().map(value->value.get("sourceFingerprint")).distinct().count());
-        assertTrue(plans.stream().map(value->value.get("callSite")).distinct().count()>=1,
-                "Selected inbound callers are preserved in accepted dependency metadata");
-        assertTrue(plans.stream().allMatch(value->String.valueOf(value.get("sourceFingerprint")).matches("[a-f0-9]{64}")));
+        String callSite=String.valueOf(plans.get(0).get("callSite"));
+        assertTrue(callSite.contains("templates/SNAPSHOT/template.yaml"),callSite);
+        assertTrue(callSite.contains("#actions[show]"),callSite);
+        assertFalse(callSite.contains("simple.flow.v1"),callSite);
+        assertFalse(callSite.contains("templates/flows/simple"),callSite);
+        assertTrue(String.valueOf(plans.get(0).get("sourceFingerprint")).matches("[a-f0-9]{64}"));
         assertTrue(dependencies.stream().filter(Map.class::isInstance).map(Object::toString)
                 .anyMatch(value->value.contains("MANIFEST")&&value.contains("package.yaml")));
         assertTrue(dependencies.stream().filter(Map.class::isInstance).map(Object::toString)
@@ -253,6 +253,89 @@ class ServerRuntimeJobReplayTest {
                 "The accepted Environment overlay must be recorded with the shared base Testdata layer");
         assertFalse(provenance.toString().contains("once"));assertFalse(provenance.toString().contains("BASE"));
         assertTrue(provenance.toString().contains("SIT"),"Environment identity is allowed value-free provenance");
+    }
+
+    @Test void nestedReachableCallersRetainDistinctProvenance() throws Exception {
+        Fixture fixture=fixture();
+        Files.writeString(fixture.root.resolve("templates/SNAPSHOT/template.yaml"),
+                "schemaVersion: att-template/v3.6\nname: SNAPSHOT\ndescription: Nested reachable callers\nactions:\n"
+                        +"  show: {type: log, message: '&{../../files/value.txt}'}\n"
+                        +"  nested: {type: flow, use: simple.flow.v1}\n");
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            var runDefinition=ServerRuntime.JSON.createObjectNode();
+            runDefinition.put("schemaVersion",RunDefinition.VERSION);runDefinition.put("executionType","run");
+            runDefinition.put("packageId","p");runDefinition.put("environment","SIT");
+            runDefinition.putObject("options").put("debug",true);
+            runDefinition.putObject("target").put("type","template").put("id","SNAPSHOT");
+            runDefinition.putObject("input");
+            Map<String,Object> draft=runtime.createRunDraft(runDefinition,"alice");
+            String id=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(draft.get("draftId"))),"alice","alice").get("jobId"));
+            await(runtime,id);
+            Map<?,?> provenance=(Map<?,?>)runtime.jobRecord(id).get("sourceProvenance");
+            List<? extends Map<?,?>> plans=((List<?>)provenance.get("dependencyClosure")).stream()
+                    .filter(Map.class::isInstance).map(value->(Map<?,?>)value)
+                    .filter(value->"FILE".equals(String.valueOf(value.get("kind")))).toList();
+            assertEquals(2,plans.size(),plans.toString());
+            assertEquals(1,plans.stream().map(value->value.get("canonicalPath")).distinct().count());
+            assertTrue(plans.stream().allMatch(value->"files/value.txt".equals(value.get("canonicalPath"))));
+            assertEquals(2,plans.stream().map(value->value.get("callSite")).distinct().count(),plans.toString());
+            assertTrue(plans.stream().anyMatch(value->String.valueOf(value.get("callSite")).contains("templates/SNAPSHOT/template.yaml")));
+            assertTrue(plans.stream().anyMatch(value->String.valueOf(value.get("callSite")).contains("templates/flows/simple/flow.yaml")));
+        }
+    }
+
+    @Test void scheduledDebugIgnoresUnrelatedMissingFileExpression() throws Exception {
+        Fixture fixture=fixture();
+        Path broken=Files.createDirectories(fixture.root.resolve("flows/broken"));
+        Files.writeString(broken.resolve("flow.yaml"),"schemaVersion: att-flow/v3.6\nid: unrelated.broken.v1\nname: Broken\n"
+                +"description: Unrelated missing File Expression\nactions:\n"
+                +"  missing: {type: log, message: '&{./does-not-exist.xml}'}\n");
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            var request=ServerRuntime.JSON.createObjectNode();
+            request.put("packageId","p");request.put("environment","SIT");
+            request.putObject("target").put("type","template").put("id","SIMPLE");
+            request.putObject("input");
+            Map<String,Object> draft=runtime.createDebugDraft(request,"alice");
+            LoadSchedule schedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of(
+                    "name","Scoped Debug","packageId","p","jobType","debug","draftId",draft.get("draftId"),
+                    "timezone","UTC","cron","0 2 * * *","enabled",false)),"alice");
+            assertEquals("template",schedule.debugTargetType);
+            assertEquals("SIMPLE",schedule.debugTargetId);
+            Map<String,Object> occurrence=runtime.triggerLoadSchedule(schedule.id,"alice");
+            assertEquals("submitted",occurrence.get("status"),occurrence.toString());
+            String id=String.valueOf(occurrence.get("jobId"));
+            await(runtime,id);
+            assertEquals("PASS",runtime.jobRecord(id).get("status"),runtime.resultRecord(id).toString());
+            Map<?,?> provenance=(Map<?,?>)runtime.jobRecord(id).get("sourceProvenance");
+            assertTrue(((List<?>)provenance.get("dependencyClosure")).stream().filter(Map.class::isInstance)
+                    .map(value->(Map<?,?>)value)
+                    .noneMatch(value->"FILE".equals(String.valueOf(value.get("kind")))
+                            &&String.valueOf(value.get("canonicalPath")).contains("does-not-exist")));
+        }
+    }
+
+    @Test void excelRunSelectionIgnoresUnrelatedMissingFileExpression() throws Exception {
+        Fixture fixture=fixture();
+        Path broken=Files.createDirectories(fixture.root.resolve("flows/broken"));
+        Files.writeString(broken.resolve("flow.yaml"),"schemaVersion: att-flow/v3.6\nid: unrelated.broken.v1\nname: Broken\n"
+                +"description: Unrelated missing File Expression\nactions:\n"
+                +"  missing: {type: log, message: '&{./does-not-exist.xml}'}\n");
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            var runDefinition=ServerRuntime.JSON.createObjectNode();
+            runDefinition.put("schemaVersion",RunDefinition.VERSION);runDefinition.put("executionType","run");
+            runDefinition.put("packageId","p");runDefinition.put("environment","SIT");
+            runDefinition.putObject("options").put("debug",false).put("failFast",false);
+            var selection=runDefinition.putObject("selection");
+            selection.putArray("caseIds").add("cases.default.C1");
+            selection.putArray("suites").add("testcase/cases.xlsx");
+            Map<String,Object> draft=runtime.createRunDraft(runDefinition,"alice");
+            String id=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(draft.get("draftId"))),"alice","alice").get("jobId"));
+            await(runtime,id);
+            assertEquals("PASS",runtime.jobRecord(id).get("status"),runtime.resultRecord(id).toString());
+        }
     }
 
     @Test void legacyRetainedExecutionSpecV1StillParses() throws Exception {

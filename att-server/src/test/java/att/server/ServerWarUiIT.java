@@ -9,8 +9,10 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
@@ -1056,11 +1058,34 @@ class ServerWarUiIT {
             assertTrue(archive.stream().map(JarEntry::getName).anyMatch(name ->
                             name.matches("WEB-INF/lib/poi-ooxml-[0-9][^/]*\\.jar")),
                     "Server WAR must ship poi-ooxml for Package resource indexing during admission");
-            try(JarInputStream poi=new JarInputStream(archive.getInputStream(poiCore))) {
-                boolean dataFormatter=false;JarEntry entry;
-                while((entry=poi.getNextJarEntry())!=null)
-                    if("org/apache/poi/ss/usermodel/DataFormatter.class".equals(entry.getName())){dataFormatter=true;break;}
-                assertTrue(dataFormatter,"Packaged poi jar must contain DataFormatter for WAR-classloader Excel indexing");
+            Path extracted=Files.createTempDirectory("att-war-poi");
+            try {
+                Path poiJar=extracted.resolve(Path.of(poiCore.getName()).getFileName().toString());
+                Files.createDirectories(poiJar.getParent());
+                try(InputStream in=archive.getInputStream(poiCore)) {Files.copy(in,poiJar);}
+                try(JarInputStream poi=new JarInputStream(Files.newInputStream(poiJar))) {
+                    boolean dataFormatter=false;JarEntry entry;
+                    while((entry=poi.getNextJarEntry())!=null)
+                        if("org/apache/poi/ss/usermodel/DataFormatter.class".equals(entry.getName())){dataFormatter=true;break;}
+                    assertTrue(dataFormatter,"Packaged poi jar must contain DataFormatter for WAR-classloader Excel indexing");
+                }
+                List<URL> warLibs=new java.util.ArrayList<>();
+                Path libDir=Files.createDirectories(extracted.resolve("WEB-INF/lib"));
+                for(JarEntry entry:java.util.Collections.list(archive.entries())) {
+                    if(!entry.getName().startsWith("WEB-INF/lib/")||!entry.getName().endsWith(".jar"))continue;
+                    Path target=libDir.resolve(Path.of(entry.getName()).getFileName().toString());
+                    try(InputStream in=archive.getInputStream(entry)) {Files.copy(in,target);}
+                    warLibs.add(target.toUri().toURL());
+                }
+                try(URLClassLoader loader=new URLClassLoader(warLibs.toArray(URL[]::new),ClassLoader.getPlatformClassLoader())) {
+                    Class<?> formatter=Class.forName("org.apache.poi.ss.usermodel.DataFormatter",true,loader);
+                    assertNotNull(formatter.getDeclaredConstructor().newInstance(),
+                            "Isolated WAR WEB-INF/lib classloader must instantiate DataFormatter");
+                }
+            } finally {
+                try(var walk=Files.walk(extracted)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path->{try{Files.deleteIfExists(path);}catch(Exception ignored){}});
+                }
             }
             Set<String> entries = new HashSet<>();
             try (JarInputStream app = new JarInputStream(archive.getInputStream(application))) {
