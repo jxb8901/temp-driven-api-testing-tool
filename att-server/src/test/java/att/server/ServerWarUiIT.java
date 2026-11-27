@@ -211,7 +211,8 @@ class ServerWarUiIT {
         toolScript.toFile().setExecutable(true);
         Files.writeString(toolDir.resolve("echo-file.yaml"),
                 "schemaVersion: att-tool/v1\nid: echo-file\nname: EchoFile\ndescription: Quoted Tool file argument\n"
-                +"command: [./tools/echo-file.sh]\nstdoutFormat: text\narguments:\n  path: {type: string, required: true}\n");
+                +"command: [./tools/echo-file.sh]\nstdoutFormat: text\narguments:\n"
+                +"  path: {name: Path, description: File to echo, type: string, required: true}\n");
         Path template=Files.createDirectories(pkg.resolve("templates/CLOSURE"));
         Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: CLOSURE\n"
                 +"description: Packaged selected File Expression closure\nactions:\n"
