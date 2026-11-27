@@ -787,7 +787,8 @@ class PackageValidatorTest {
         Path root = Files.createDirectories(tempDir.resolve("immutable-source"));
         // A regular file blocks the writable-ancestor walk without relying on POSIX mode bits,
         // which remain writable for privileged/root processes and are not portable.
-        Path blocker = Files.writeString(root.resolve("blocker"), "not-a-directory");
+        Path blocker = Files.write(root.resolve("blocker"),
+                "not-a-directory".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         Path blockedOutput = blocker.resolve("child/output");
         FrameworkConfig config = new FrameworkConfig(java.nio.file.Paths.get("output"), root.resolve("report"),
                 root.resolve("logs"), "SIT", 1000, root.resolve("templates"),

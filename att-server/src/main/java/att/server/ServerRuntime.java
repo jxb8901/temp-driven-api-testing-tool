@@ -5509,8 +5509,11 @@ final class ServerRuntime implements AutoCloseable {
     private static void addLoadScenarioRoots(Set<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots,
                                              att.load.LoadScenario scenario) {
         if(scenario==null)return;
-        for(att.load.LoadWorkload workload:scenario.workloads())
-            roots.add(new att.validation.SourceCandidateValidator.ExecutionFileRoot(workload.targetType(),workload.targetId()));
+        for(att.load.LoadWorkload workload:scenario.workloads()) {
+            if(workload.mixed()) {
+                for(att.load.LoadMixEntry entry:workload.mix())addExecutionRoot(roots,entry.targetType(),entry.targetId());
+            } else addExecutionRoot(roots,workload.targetType(),workload.targetId());
+        }
     }
 
     private static void addExecutionTarget(Set<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots,
@@ -5518,9 +5521,15 @@ final class ServerRuntime implements AutoCloseable {
         if(target==null)return;
         Object type=target.get("type"),id=target.get("id");
         if(!(type instanceof String)||!(id instanceof String))return;
-        String normalized=((String)type).trim().toLowerCase(java.util.Locale.ROOT);
+        addExecutionRoot(roots,(String)type,(String)id);
+    }
+
+    private static void addExecutionRoot(Set<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots,
+                                         String type,String id) {
+        if(type==null||type.isBlank()||id==null||id.isBlank())return;
+        String normalized=type.trim().toLowerCase(java.util.Locale.ROOT);
         if(!Set.of("template","flow","tool").contains(normalized))return;
-        roots.add(new att.validation.SourceCandidateValidator.ExecutionFileRoot(normalized,(String)id));
+        roots.add(new att.validation.SourceCandidateValidator.ExecutionFileRoot(normalized,id.trim()));
     }
 
     private JobSourceClosureStore.SourceProvenance jobSourceProvenance(String packageId,PackageRegistry.Snapshot registry,
