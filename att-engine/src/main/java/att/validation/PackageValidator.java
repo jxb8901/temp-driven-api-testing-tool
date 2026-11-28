@@ -795,6 +795,9 @@ public final class PackageValidator {
         // Package roots contain business resources only. Config and schemas are ATT runtime resources.
         try { att.validation.SchemaFiles.validateCatalog(projectRoot); }
         catch (Exception error) { diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, error, null)); }
+        // Studio/immutable source inspection validates configuration semantics only. Execution readiness
+        // (CLI validate/run and Job output) keeps the writable-ancestor check via checkOutputWritability.
+        if (!options.checkOutputWritability()) return;
         try {
             Path output = options.outputDirectory() == null
                     ? projectRoot.resolve(global.outputDirectory()).normalize()
@@ -1681,8 +1684,14 @@ public final class PackageValidator {
         att.template.UnifiedTemplateEngine engine = att.template.UnifiedTemplateEngine.forProject(projectRoot);
         Set<String> completedActions = new LinkedHashSet<String>();
         Set<String> actionIds = new LinkedHashSet<String>();
-        validateTemplateRuntimeActions(template, testCase, config, caseFile, assignedCaseVariables,
-                context, engine, actionIds, completedActions);
+        Path previousSourceDirectory = validationSourceDirectories.get();
+        validationSourceDirectories.set(template.directory());
+        try (att.template.UnifiedTemplateEngine.SourceScope ignored = engine.pushSourceDirectory(template.directory())) {
+            validateTemplateRuntimeActions(template, testCase, config, caseFile, assignedCaseVariables,
+                    context, engine, actionIds, completedActions);
+        } finally {
+            validationSourceDirectories.set(previousSourceDirectory);
+        }
     }
 
     private void validateTemplateRuntimeActions(StageTemplate template, TestCase testCase, FrameworkConfig config,
@@ -1725,6 +1734,7 @@ public final class PackageValidator {
                     sourceField = "actions." + action.id() + ".expression";
                     validateContextStructure(action.expression(), engine, context, testCase, completedActions, action.id());
                     engine.renderValidationValues(action.expression(), context);
+                    validateFileExpressions(action.expression(), validationSourceDirectories.get(), config);
                     for (ToolCallParser.ParsedCall call : engine.parseCalls(action.expression())) {
                         validateCallArguments(call, context, engine);
                     }
@@ -1746,6 +1756,7 @@ public final class PackageValidator {
                     sourceField = "actions." + action.id() + ".expression";
                     validateContextStructure(action.expression(), engine, context, testCase, completedActions, action.id());
                     engine.renderValidationValues(action.expression(), context);
+                    validateFileExpressions(action.expression(), validationSourceDirectories.get(), config);
                     for (ToolCallParser.ParsedCall call : engine.parseCalls(action.expression())) {
                         validateCallArguments(call, context, engine);
                     }
@@ -1755,16 +1766,19 @@ public final class PackageValidator {
                 sourceField = "actions." + action.id() + ".message";
                 validateContextStructure(action.message(), engine, context, testCase, completedActions, action.id());
                 engine.renderValidationValues(action.message(), context);
+                validateFileExpressions(action.message(), validationSourceDirectories.get(), config);
                 validateCallArgumentsIn(action.message(), context, engine);
 
                 sourceField = "actions." + action.id() + ".file";
                 validateContextStructure(action.file(), engine, context, testCase, completedActions, action.id());
                 engine.renderValidationValues(action.file(), context);
+                validateFileExpressions(action.file(), validationSourceDirectories.get(), config);
                 validateCallArgumentsIn(action.file(), context, engine);
 
                 sourceField = "actions." + action.id() + ".result.path";
                 validateContextStructure(action.resultConfig().path(), engine, context, testCase, completedActions, action.id());
                 engine.renderValidationValues(action.resultConfig().path(), context);
+                validateFileExpressions(action.resultConfig().path(), validationSourceDirectories.get(), config);
                 validateCallArgumentsIn(action.resultConfig().path(), context, engine);
 
                 for (Object key : action.fields().keySet()) {
@@ -1772,17 +1786,20 @@ public final class PackageValidator {
                     Object value = action.fields().get(key);
                     validateContextStructure(String.valueOf(value), engine, context, testCase, completedActions, action.id());
                     engine.renderValidationValues(String.valueOf(value), context);
+                    validateFileExpressions(String.valueOf(value), validationSourceDirectories.get(), config);
                     validateCallArgumentsIn(String.valueOf(value), context, engine);
                 }
                 if ("tool".equalsIgnoreCase(action.type())) {
                     sourceField = "actions." + action.id() + ".call";
                     validateContextStructure(action.call(), engine, context, testCase, completedActions, action.id());
                     engine.renderValidationValues(action.call(), context);
+                    validateFileExpressions(action.call(), validationSourceDirectories.get(), config);
                     validateCallArgumentsIn(action.call(), context, engine);
                     for (EvidenceCollector collector : action.evidence().values()) {
                         sourceField = "actions." + action.id() + ".evidence." + collector.id() + ".call";
                         validateContextStructure(collector.call(), engine, context, testCase, completedActions, action.id());
                         engine.renderValidationValues(collector.call(), context);
+                        validateFileExpressions(collector.call(), validationSourceDirectories.get(), config);
                         validateCallArgumentsIn(collector.call(), context, engine);
                     }
                 }
@@ -1882,10 +1899,13 @@ public final class PackageValidator {
                     att.flow.FlowDefinition target = flows.get(action.use());
                     StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), target.templateSchemaVersion(), target.directory().resolve("flow.yaml"));
                     context.beginFlow(action.use(), action.id());
-                    try {
+                    Path previousFlowSourceDirectory = validationSourceDirectories.get();
+                    validationSourceDirectories.set(body.directory());
+                    try (att.template.UnifiedTemplateEngine.SourceScope ignored = engine.pushSourceDirectory(body.directory())) {
                         validateTemplateRuntimeActions(body, testCase, config, caseFile, assignedCaseVariables,
                                 context, engine, new LinkedHashSet<String>(), new LinkedHashSet<String>());
                     } finally {
+                        validationSourceDirectories.set(previousFlowSourceDirectory);
                         context.finishFlow();
                     }
                 }

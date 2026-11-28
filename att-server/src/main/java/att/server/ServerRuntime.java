@@ -2056,14 +2056,23 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> setDeletionRequested(String id,boolean requested,String actor) throws Exception {
         if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
         if("local".equals(config.authMode)&&!store.isActiveUser(actor))throw new NotFoundException();
-        if(!artifactLifecycle.writeLock().tryLock())return deletionOutcome(id,actor,"ARCHIVE_BUSY");
+        // A fully removed Job needs no archive fence: mark/unmark cannot change retention state.
+        if(!store.jobRowExists(id))return deletionMarkOutcome(id,requested,actor);
+        if(!artifactLifecycle.writeLock().tryLock()) {
+            // Concurrent archive readers can hold the fence while reconcile finishes removing the row.
+            if(!store.jobRowExists(id))return deletionMarkOutcome(id,requested,actor);
+            return deletionOutcome(id,actor,"ARCHIVE_BUSY");
+        }
         try {
             if(requested&&(jobs.containsKey(id)||pendingArtifactJobs.contains(id)||store.workerMayBeAlive(id)))return deletionOutcome(id,actor,"JOB_BUSY");
-            String outcome=store.setDeletionRequested(id,requested,actor,System.currentTimeMillis());
-            Map<String,Object> response=new LinkedHashMap<>();response.put("jobId",id);response.put("outcome",outcome);
-            Map<String,Object> current=store.get(id);response.put("deletionState",current==null?null:current.get("deletionState"));
-            return response;
+            return deletionMarkOutcome(id,requested,actor);
         } finally {artifactLifecycle.writeLock().unlock();}
+    }
+    private Map<String,Object> deletionMarkOutcome(String id,boolean requested,String actor) throws Exception {
+        String outcome=store.setDeletionRequested(id,requested,actor,System.currentTimeMillis());
+        Map<String,Object> response=new LinkedHashMap<>();response.put("jobId",id);response.put("outcome",outcome);
+        Map<String,Object> current=store.get(id);response.put("deletionState",current==null?null:current.get("deletionState"));
+        return response;
     }
     /** Five-second bounded cadence, with at least thirty seconds to cancel a pending mark. */
     void cleanupRequestedDeletions() throws Exception {
@@ -5443,10 +5452,26 @@ final class ServerRuntime implements AutoCloseable {
         String selectedLoadPath=request!=null&&request.scenario!=null?request.scenario:schedule==null?null:schedule.scenario;
         Map<String,Object> selectedLoadScenario=request!=null&&request.inlineLoadScenario!=null
                 ?request.inlineLoadScenario:schedule==null?null:schedule.inlineScenario;
-        att.server.api.source.SourceManagementContracts.EffectiveResolution closure=
-                new att.validation.SourceCandidateValidator().resolveEffective(packageId,environment,packageSnapshot,
-                        configurationSnapshot.sourceWorkerConfigPath,configurationSnapshot.sourceRoot,revisions,
-                        selectedLoadPath,selectedLoadScenario);
+        att.config.FrameworkConfig framework=new att.config.FrameworkConfigLoader().loadDiscovery(
+                configurationSnapshot.sourceWorkerConfigPath,configurationSnapshot.sourceRoot,packageSnapshot,environment);
+        java.util.Collection<att.validation.SourceCandidateValidator.ExecutionFileRoot> executionRoots;
+        try {
+            executionRoots=executionFileRoots(packageId,request,schedule,packageSnapshot,framework,selectedLoadPath,selectedLoadScenario);
+        } catch(att.validation.SourceCandidateValidator.UnresolvedExecutionRootException unresolved) {
+            throw new JobConflictException("ATT-SOURCE-EXECUTION-ROOT-MISSING",unresolved.getMessage());
+        }
+        att.validation.SourceCandidateValidator sourceValidator=new att.validation.SourceCandidateValidator();
+        att.server.api.source.SourceManagementContracts.EffectiveResolution closure;
+        byte[] compiledPlans;
+        try {
+            closure=sourceValidator.resolveEffective(packageId,environment,packageSnapshot,
+                    configurationSnapshot.sourceWorkerConfigPath,configurationSnapshot.sourceRoot,revisions,
+                    selectedLoadPath,selectedLoadScenario,executionRoots);
+            compiledPlans=sourceValidator.compileFileExpressionSnapshot(
+                    packageSnapshot,configurationSnapshot.sourceWorkerConfigPath,configurationSnapshot.sourceRoot,environment,executionRoots);
+        } catch(att.validation.SourceCandidateValidator.UnresolvedExecutionRootException unresolved) {
+            throw new JobConflictException("ATT-SOURCE-EXECUTION-ROOT-MISSING",unresolved.getMessage());
+        }
         if(!closure.complete)throw new JobConflictException("ATT-SOURCE-CLOSURE-INCOMPLETE",
                 "The approved Package dependency closure could not be captured completely; validate the execution again.");
         List<Map<String,Object>> dependencies=JSON.convertValue(closure.dependencies,List.class);
@@ -5463,9 +5488,203 @@ final class ServerRuntime implements AutoCloseable {
             addSnapshotPath(logicalPaths,schedule.scenario);
             if(schedule.runInput!=null) addRequestPaths(logicalPaths,JSON.convertValue(schedule.runInput,WorkerRequest.class));
         }
-        byte[] compiledPlans=new att.validation.SourceCandidateValidator().compileFileExpressionSnapshot(
-                packageSnapshot,configurationSnapshot.sourceWorkerConfigPath,configurationSnapshot.sourceRoot,environment);
         return jobSourceClosures.provenance(revisions,validationFingerprint,dependencies,List.copyOf(logicalPaths),compiledPlans);
+    }
+
+    /**
+     * Selected Template/Flow/Tool roots for Job File-expression plans. Empty after derivation keeps
+     * the historical whole-catalog walk only when no execution target or case/suite selection exists.
+     */
+    private static java.util.Collection<att.validation.SourceCandidateValidator.ExecutionFileRoot> executionFileRoots(
+            String packageId,WorkerRequest request,LoadSchedule schedule,Path packageRoot,
+            att.config.FrameworkConfig framework,String loadScenarioPath,Map<String,Object> inlineLoadScenario) throws Exception {
+        LinkedHashSet<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots=new LinkedHashSet<>();
+        addExecutionTarget(roots,request==null?null:request.target);
+        if(request!=null)addRunSelectionRoots(roots,packageId,packageRoot,framework,request);
+        if(schedule!=null) {
+            addExecutionRoot(roots,schedule.debugTargetType,schedule.debugTargetId);
+            if(schedule.runInput!=null) {
+                WorkerRequest scheduled=JSON.convertValue(schedule.runInput,WorkerRequest.class);
+                addExecutionTarget(roots,scheduled==null?null:scheduled.target);
+                if(scheduled!=null)addRunSelectionRoots(roots,packageId,packageRoot,framework,scheduled);
+            }
+        }
+        if(loadScenarioPath!=null&&!loadScenarioPath.isBlank()) {
+            att.resource.PackageResourceResolver.PackageResource source=new att.resource.PackageResourceResolver(packageRoot)
+                    .resolvePackageRelative(loadScenarioPath,att.resource.PackageResourceResolver.Kind.FILE);
+            addLoadScenarioRoots(roots,new att.load.LoadScenarioLoader(packageRoot).load(source.canonicalPath()));
+        }
+        if(inlineLoadScenario!=null) {
+            Map<String,Object> copy=att.load.LoadIsolation.deepCopyMap(inlineLoadScenario);
+            addLoadScenarioRoots(roots,new att.load.LoadScenarioLoader(packageRoot).loadInline(copy));
+        }
+        return roots.isEmpty()?null:roots;
+    }
+
+    /** Excel Case and Native Definition selections contribute their Template/Flow roots. */
+    private static void addRunSelectionRoots(Set<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots,
+                                             String packageId,Path packageRoot,att.config.FrameworkConfig framework,
+                                             WorkerRequest request) throws Exception {
+        if(request==null)return;
+        if(request.nativeCaseSourcePath!=null&&!request.nativeCaseSourcePath.isBlank())
+            addNativeDefinitionFlowRoot(roots,packageId,packageRoot,framework,request.nativeCaseSourcePath);
+        if(request.nativeSuiteSourcePaths!=null&&!request.nativeSuiteSourcePaths.isEmpty()) {
+            LinkedHashSet<String> selectedDefinitions=selectedNativeSuiteDefinitions(request);
+            for(Map.Entry<String,String> entry:request.nativeSuiteSourcePaths.entrySet()) {
+                if(entry.getKey()==null||entry.getValue()==null||entry.getValue().isBlank())continue;
+                if(!selectedDefinitions.isEmpty()&&!selectedDefinitions.contains(entry.getKey()))continue;
+                addNativeDefinitionFlowRoot(roots,packageId,packageRoot,framework,entry.getValue());
+            }
+        }
+        if(request.caseIds!=null&&!request.caseIds.isEmpty())
+            addExcelCaseTemplateRoots(roots,packageRoot,framework,request);
+    }
+
+    /**
+     * Definitions represented by the frozen qualified Case selection. Excluded Definitions in
+     * {@code nativeSuiteSourcePaths} must not contribute File Expression roots.
+     */
+    static LinkedHashSet<String> selectedNativeSuiteDefinitions(WorkerRequest request) {
+        LinkedHashSet<String> selected=new LinkedHashSet<>();
+        if(request.nativeSuiteQualifiedCaseIds!=null) {
+            for(String qualified:request.nativeSuiteQualifiedCaseIds) {
+                if(qualified==null||qualified.isBlank())continue;
+                int separator=qualified.lastIndexOf('.');
+                if(separator<=0||separator>=qualified.length()-1)continue;
+                selected.add(qualified.substring(0,separator));
+            }
+        }
+        return selected;
+    }
+
+    /** Test seam for Native Case Flow-root admission parity with Worker/Engine. */
+    static att.validation.SourceCandidateValidator.ExecutionFileRoot nativeDefinitionFlowRoot(
+            String packageId,Path packageRoot,att.config.FrameworkConfig framework,String relativePath) throws Exception {
+        LinkedHashSet<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots=new LinkedHashSet<>();
+        addNativeDefinitionFlowRoot(roots,packageId,packageRoot,framework,relativePath);
+        if(roots.size()!=1)
+            throw new IllegalStateException("Native Case '"+relativePath+"' must resolve exactly one Flow root");
+        return roots.iterator().next();
+    }
+
+    private static void addNativeDefinitionFlowRoot(Set<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots,
+                                                    String packageId,Path packageRoot,att.config.FrameworkConfig framework,
+                                                    String relativePath) throws Exception {
+        try {
+            att.resource.PackageResourceResolver resources=new att.resource.PackageResourceResolver(packageRoot);
+            att.resource.PackageResourceResolver.PackageResource source=resources.resolvePackageRelative(
+                    relativePath,att.resource.PackageResourceResolver.Kind.FILE);
+            Path schema=att.validation.SchemaFiles.resolve(resources.packageRoot(),"att-testcase-v1.schema.json");
+            att.testcase.TestCaseResolutionResult resolved=new att.testcase.TestCaseDefinitionResolver(schema).resolve(
+                    source.canonicalPath(),packageId,resources.packageRoot(),
+                    framework.flowRoot(),framework.templatesRoot(),
+                    att.testcase.TestCaseDefinitionResolver.Options.defaults());
+            String flowId=resolved.definition().flowId();
+            if(flowId==null||flowId.isBlank())
+                throw new att.validation.SourceCandidateValidator.UnresolvedExecutionRootException("flow",relativePath,
+                        "Native Case source '"+relativePath+"' does not declare a Flow");
+            addExecutionRoot(roots,"flow",flowId);
+        } catch(att.validation.SourceCandidateValidator.UnresolvedExecutionRootException unresolved) {
+            throw unresolved;
+        } catch(Exception failure) {
+            throw new att.validation.SourceCandidateValidator.UnresolvedExecutionRootException("flow",relativePath,
+                    "Native Case source '"+relativePath+"' is unavailable");
+        }
+    }
+
+    private static void addExcelCaseTemplateRoots(Set<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots,
+                                                  Path packageRoot,att.config.FrameworkConfig framework,
+                                                  WorkerRequest request) throws Exception {
+        LinkedHashSet<String> selected=new LinkedHashSet<>();
+        for(String caseId:request.caseIds)if(caseId!=null&&!caseId.isBlank())selected.add(caseId.trim());
+        if(selected.isEmpty())return;
+        List<Path> workbooks=excelSuiteWorkbooks(packageRoot,framework,request);
+        if(workbooks.isEmpty())
+            throw new att.validation.SourceCandidateValidator.UnresolvedExecutionRootException("template",
+                    String.join(",",selected),"Selected Excel Cases have no suite workbook");
+        att.config.SuiteConfigResolver resolver=new att.config.SuiteConfigResolver(packageRoot,framework);
+        LinkedHashSet<String> matched=new LinkedHashSet<>();
+        for(Path workbook:workbooks) {
+            att.config.FrameworkConfig suiteConfig=resolver.resolve(workbook);
+            for(att.core.TestCase testCase:new att.excel.ExcelTestSuiteLoader(suiteConfig).load(workbook)) {
+                if(!selected.contains(testCase.caseId()))continue;
+                matched.add(testCase.caseId());
+                for(att.core.StageCaseData stage:testCase.stages().values())
+                    addExecutionRoot(roots,"template",stage.templateName());
+            }
+        }
+        if(!matched.containsAll(selected)) {
+            LinkedHashSet<String> missing=new LinkedHashSet<>(selected);
+            missing.removeAll(matched);
+            throw new att.validation.SourceCandidateValidator.UnresolvedExecutionRootException("template",
+                    String.join(",",missing),"Selected Excel Case '"+missing.iterator().next()+"' is unavailable");
+        }
+    }
+
+    /**
+     * Matches {@link att.core.FrameworkEngine} suite discovery: walk the suite directory (or
+     * configured testcase root) when {@code suiteDirectory} is set or the suite list is empty;
+     * otherwise use the explicit suite paths. Directory discovery keeps only workbooks that have
+     * a sidecar YAML, with no artificial depth cap.
+     */
+    static List<Path> excelSuiteWorkbooks(Path packageRoot,att.config.FrameworkConfig framework,
+                                          WorkerRequest request) throws Exception {
+        att.resource.PackageResourceResolver resources=new att.resource.PackageResourceResolver(packageRoot);
+        List<Path> suites=new ArrayList<>();
+        boolean walkDirectory=request.suiteDirectory!=null||request.suites==null||request.suites.isEmpty();
+        if(walkDirectory) {
+            Path configured=request.suiteDirectory!=null&&!request.suiteDirectory.isBlank()
+                    ?Path.of(request.suiteDirectory):framework.testcasesRoot();
+            att.resource.PackageResourceResolver.PackageResource directory=configured.isAbsolute()
+                    ?resources.fromInternalPath(configured,att.resource.PackageResourceResolver.Kind.DIRECTORY)
+                    :resources.resolvePackageRelative(configured.toString().replace('\\','/'),
+                            att.resource.PackageResourceResolver.Kind.DIRECTORY);
+            try(java.util.stream.Stream<Path> paths=Files.walk(directory.canonicalPath())) {
+                paths.filter(Files::isRegularFile)
+                        .filter(path->path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".xlsx"))
+                        .filter(path->Files.isRegularFile(path.resolveSibling(
+                                path.getFileName().toString().replaceFirst("(?i)\\.xlsx$",".yaml"))))
+                        .sorted().forEach(suites::add);
+            }
+        } else {
+            for(String suite:request.suites) {
+                if(suite==null||suite.isBlank())continue;
+                try {
+                    suites.add(resources.resolvePackageRelative(suite,att.resource.PackageResourceResolver.Kind.FILE)
+                            .canonicalPath());
+                } catch(Exception unavailable) {
+                    throw new att.validation.SourceCandidateValidator.UnresolvedExecutionRootException("template",suite,
+                            "Excel suite '"+suite+"' is unavailable");
+                }
+            }
+        }
+        return suites;
+    }
+
+    private static void addLoadScenarioRoots(Set<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots,
+                                             att.load.LoadScenario scenario) {
+        if(scenario==null)return;
+        for(att.load.LoadWorkload workload:scenario.workloads()) {
+            if(workload.mixed()) {
+                for(att.load.LoadMixEntry entry:workload.mix())addExecutionRoot(roots,entry.targetType(),entry.targetId());
+            } else addExecutionRoot(roots,workload.targetType(),workload.targetId());
+        }
+    }
+
+    private static void addExecutionTarget(Set<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots,
+                                           Map<String,Object> target) {
+        if(target==null)return;
+        Object type=target.get("type"),id=target.get("id");
+        if(!(type instanceof String)||!(id instanceof String))return;
+        addExecutionRoot(roots,(String)type,(String)id);
+    }
+
+    private static void addExecutionRoot(Set<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots,
+                                         String type,String id) {
+        if(type==null||type.isBlank()||id==null||id.isBlank())return;
+        String normalized=type.trim().toLowerCase(java.util.Locale.ROOT);
+        if(!Set.of("template","flow","tool").contains(normalized))return;
+        roots.add(new att.validation.SourceCandidateValidator.ExecutionFileRoot(normalized,id.trim()));
     }
 
     private JobSourceClosureStore.SourceProvenance jobSourceProvenance(String packageId,PackageRegistry.Snapshot registry,

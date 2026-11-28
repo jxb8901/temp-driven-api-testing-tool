@@ -350,7 +350,8 @@ public final class DefaultAttService implements AttService {
     }
     @Override public ValidateResult validate(ValidateRequest request) throws Exception {
         long started=System.nanoTime();
-        ExecutionOptions opts=options(request,"validate",request.suites(),request.suiteDirectory(),request.caseIds(),request.tags(),request.excludeTags(),request.all(),false,true,false,request.scope(),null,null,null,false,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList());
+        ExecutionOptions opts=options(request,"validate",request.suites(),request.suiteDirectory(),request.caseIds(),request.tags(),request.excludeTags(),request.all(),false,true,false,request.scope(),null,null,null,false,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList())
+                .withCheckOutputWritability(request.checkOutputWritability());
         FrameworkConfig cfg=config(request);
         PackageValidator.ValidationSummary result=new PackageValidator(request.packageRoot(),cfg,
                 RuntimeConfigPath.resolve(request.configPath(), request.packageRoot())).validate(opts);

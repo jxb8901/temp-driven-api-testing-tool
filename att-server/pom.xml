@@ -3,23 +3,18 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <parent><groupId>att</groupId><artifactId>template-driven-api-testing-tool</artifactId><version>4.6.0</version><relativePath>../pom.xml</relativePath></parent>
+    <parent><groupId>att</groupId><artifactId>template-driven-api-testing-tool</artifactId><version>4.6.1</version><relativePath>../pom.xml</relativePath></parent>
     <artifactId>att-server</artifactId>
     <packaging>war</packaging>
     <name>ATT Server</name>
     <description>Single-node ATT control plane for external Jakarta Servlet containers.</description>
     <dependencies>
         <dependency><groupId>att</groupId><artifactId>att-server-api</artifactId><version>${project.version}</version></dependency>
-        <!-- Business metrics execute one bounded post-run call through the existing Engine DBHelper/Tool APIs. -->
-        <!-- Business-call execution uses the Engine DBHelper/Tool path, not its Excel import/report suite. -->
-        <dependency><groupId>att</groupId><artifactId>att-engine</artifactId><version>${project.version}</version>
-            <exclusions>
-                <exclusion><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId></exclusion>
-                <exclusion><groupId>org.apache.commons</groupId><artifactId>commons-math3</artifactId></exclusion>
-            </exclusions>
-        </dependency>
-        <!-- Server test fixtures exercise the Engine Excel/Archive helpers; keep those libraries out of the runtime WAR. -->
-        <dependency><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId><scope>test</scope></dependency>
+        <!-- Business metrics and Job source-provenance/resource indexing use Engine PackageResourceInspector,
+             which loads Excel via Apache POI. Keep poi-ooxml (and its transitives) on the Server WAR classpath. -->
+        <dependency><groupId>att</groupId><artifactId>att-engine</artifactId><version>${project.version}</version></dependency>
+        <!-- Explicit so WAR packaging retains POI even if Engine dependency scope changes. -->
+        <dependency><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId></dependency>
         <!-- ServerRuntime directly uses att.metrics/att.security classes, so keep the
              dependency explicit: the application-jar assembly only bundles direct deps. -->
         <dependency><groupId>att</groupId><artifactId>att-security</artifactId><version>${project.version}</version></dependency>

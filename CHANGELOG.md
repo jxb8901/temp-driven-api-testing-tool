@@ -1,6 +1,15 @@
 Warning: truncated output (original token count: 13174)
 Total output lines: 396
 
+# ATT 4.6.1 — patch release
+
+## Validation and Server packaging
+
+- Separate Studio/immutable source inspection from execution output readiness so package validation no longer reports false `ATT-PATH-001` against read-only Package revisions with a normal relative `outputDirectory` (#431).
+- Bind File Expression descriptor source scope during runtime-value validation (including nested Flow bodies) so `&{./...}` resolves from the referring descriptor directory, matching static validation and execution (#432).
+- Ship Apache POI (`poi` / `poi-ooxml` and required transitives) on the Server WAR classpath so Job Admission source-provenance/resource indexing no longer fails with `ClassNotFoundException: org.apache.poi.ss.usermodel.DataFormatter` (#433).
+- Return a structured Server error for submission `LinkageError` failures instead of relying on an unhandled container response (#433).
+
 # ATT 4.6.0 — formal release (2026-11-23)
 
 ## Native Test Authoring

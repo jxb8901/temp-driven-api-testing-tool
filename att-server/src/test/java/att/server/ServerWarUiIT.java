@@ -9,8 +9,10 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
@@ -186,6 +188,166 @@ class ServerWarUiIT {
         }
     }
 
+    @Test void packagedWarSelectedClosureAndLocatorPinSurviveDraftAdmission() throws Exception {
+        Assumptions.assumeTrue(sourceSnapshotSandboxAvailable(),
+                "OS-enforced source snapshot sandbox is unavailable on this host");
+        Path war=Path.of(System.getProperty("att.server.war"));assertTrue(Files.isRegularFile(war));
+        Path home=createScheduledLocalRuntime();
+        Files.createDirectories(home.resolve("config"));
+        Files.writeString(home.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+                +"environments: {SIT: {}}\ntestcase: {root: testcase}\ntemplates: {root: templates}\n");
+        Path allowed=Files.createDirectories(temp.resolve("closure-allowed"));
+        Path pkg=Files.createDirectories(allowed.resolve("closure"));
+        Path nested=Files.createDirectories(pkg.resolve("templates/flows/nested"));
+        Files.writeString(nested.resolve("Pacs008.xml"),"<nested>alpha-payload</nested>\n");
+        Files.writeString(nested.resolve("flow.yaml"),"schemaVersion: att-flow/v3.6\nid: nested.closure.v1\nname: Nested\n"
+                +"description: Nested Flow sibling File Expression\nactions:\n"
+                +"  body: {type: log, message: '&{./Pacs008.xml}'}\n");
+        Files.writeString(nested.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        Path quoted=Files.createDirectories(pkg.resolve("templates/flows/quoted"));
+        Files.writeString(quoted.resolve("Pacs008.xml"),"<quoted>flow-payload</quoted>\n");
+        Files.writeString(quoted.resolve("flow.yaml"),"schemaVersion: att-flow/v3.6\nid: quoted.closure.v1\nname: Quoted\n"
+                +"description: Flow Functional Execution File Expression Tool argument\nactions:\n"
+                +"  tool: {type: tool, call: \"#{echo(payload='&{./Pacs008.xml}')}\"}\n");
+        Files.writeString(quoted.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        Path toolDir=Files.createDirectories(pkg.resolve("tools"));
+        Files.writeString(toolDir.resolve("echo.yaml"),
+                "schemaVersion: att-tool/v1\nid: echo\nname: Echo\ndescription: Harmless quoted File Expression echo\n"
+                +"command: [/usr/bin/printf, '%s', '${payload}']\nstdoutFormat: text\narguments:\n"
+                +"  payload: {name: Payload, description: Resolved file content, type: string, required: true}\n");
+        Path template=Files.createDirectories(pkg.resolve("templates/CLOSURE"));
+        Files.writeString(template.resolve("Pacs008.xml"),"<template>alpha-payload</template>\n");
+        Files.writeString(template.resolve("Pacs008-b.xml"),"<template>beta-payload</template>\n");
+        Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: CLOSURE\n"
+                +"description: Packaged selected File Expression closure\nactions:\n"
+                +"  nested: {type: flow, use: nested.closure.v1}\n"
+                +"  tool: {type: tool, call: \"#{echo(payload='&{./Pacs008.xml}')}\"}\n");
+        Files.writeString(template.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        Files.createDirectories(pkg.resolve("testcase"));
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+            var out=Files.newOutputStream(pkg.resolve("testcase/closure.xlsx"))) {
+            var sheet=book.createSheet("Cases");var header=sheet.createRow(0);
+            header.createCell(0).setCellValue("ID");header.createCell(1).setCellValue("Tags");header.createCell(2).setCellValue("Template");
+            var row=sheet.createRow(1);row.createCell(0).setCellValue("C1");row.createCell(1).setCellValue("smoke");
+            row.createCell(2).setCellValue("name: CLOSURE");book.write(out);
+        }
+        Files.writeString(pkg.resolve("testcase/closure.yaml"),"schemaVersion: att-sidecar/v2.2\nid: closure\nexcel:\n"
+                +"  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
+        Files.writeString(pkg.resolve("package.yaml"),"schemaVersion: att-package/v1\n");
+        copySchemas(pkg);
+        new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(pkg,home.resolve("config/config.yaml"),
+                "SIT",List.of(Path.of("testcase/closure.xlsx")),null,Set.of(),false));
+        Path users=Files.writeString(temp.resolve("closure-users.xml"),
+                "<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
+        Path config=Files.writeString(temp.resolve("closure-server.yaml"),"server:\n  runtimeConfigPath: "+yaml(home.resolve("config/config.yaml"))
+                +"\n  dataDir: "+yaml(temp.resolve("closure-data"))+"\n  javaExecutable: "+yaml(Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java"))
+                +"\n  authenticationRequired: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\npackages:\n  allowedRoots: ["
+                +yaml(allowed)+"]\n  entries: {closure: "+yaml(pkg)+"}\n");
+        String oldConfig=System.getProperty("att.server.config"),oldHome=System.getProperty("att.home");
+        System.setProperty("att.server.config",config.toString());System.setProperty("att.home",home.toString());
+        Tomcat tomcat=new Tomcat();tomcat.setBaseDir(temp.resolve("closure-tomcat").toString());tomcat.setPort(0);tomcat.getConnector();
+        MemoryRealm realm=new MemoryRealm();realm.setPathname(users.toString());tomcat.getEngine().setRealm(realm);
+        ((StandardHost)tomcat.getHost()).setUnpackWARs(false);tomcat.addWebapp("/att",war.toString());
+        try {
+            tomcat.start();int port=tomcat.getConnector().getLocalPort();String origin="http://127.0.0.1:"+port,api="/att/api/v1",auth=basic("att");
+            JsonNode validateAccepted=apiJsonResponse(port,"POST",api+"/jobs/validate",auth,origin,
+                    Map.of("packageId","closure","validationScope","package"),202);
+            JsonNode validateJob=awaitTerminalJobStatus(port,api+"/jobs/"+validateAccepted.path("jobId").asText(),auth);
+            assertEquals("PASS",validateJob.path("status").asText(),
+                    getJson(port,api+"/jobs/"+validateAccepted.path("jobId").asText()+"/result",auth).toString());
+            assertFalse(validateJob.toString().contains("ATT-PATH-001"),validateJob.toString());
+            assertFalse(getJson(port,api+"/jobs/"+validateAccepted.path("jobId").asText()+"/result",auth).toString()
+                    .contains("ATT-PATH-001"));
+
+            Map<String,Object> flowDefinition=Map.of("schemaVersion","att-execution/v1","executionType","run","packageId","closure",
+                    "environment","SIT","target",Map.of("type","flow","id","quoted.closure.v1"),"input",Map.of(),
+                    "options",Map.of("debug",false));
+            JsonNode flowDraft=apiJsonResponse(port,"POST",api+"/drafts/run",auth,origin,flowDefinition,201);
+            JsonNode flowAccepted=apiJsonResponse(port,"POST",api+"/jobs/run",auth,origin,
+                    Map.of("packageId","closure","draftId",flowDraft.path("draftId").asText()),202);
+            String flowId=flowAccepted.path("jobId").asText();
+            JsonNode flowJob=awaitJobStatus(port,api+"/jobs/"+flowId,auth,"PASS");
+            assertEquals(Boolean.TRUE,flowJob.path("sourceSnapshotAvailable").asBoolean(false),flowJob.toString());
+            assertFileCallSite(flowJob.path("sourceProvenance"),"templates/flows/quoted/Pacs008.xml",
+                    "templates/flows/quoted/flow.yaml");
+            awaitArchive(port,api,flowId,auth);
+            String flowLog=readArchiveEntryText(port,api+"/jobs/"+flowId+"/artifacts/archive.zip",auth,"case.log");
+            assertNotNull(flowLog,"Flow Functional Execution must publish a Case log");
+            assertTrue(flowLog.contains("<quoted>flow-payload</quoted>"),
+                    "Quoted Tool File Expression must echo sibling payload content: "+flowLog);
+
+            Map<String,Object> excelDefinition=Map.of("schemaVersion","att-execution/v1","executionType","run","packageId","closure",
+                    "environment","SIT","selection",Map.of("caseIds",List.of("closure.default.C1"),"suites",List.of("testcase/closure.xlsx")),
+                    "options",Map.of("debug",false,"failFast",false));
+            JsonNode draft=apiJsonResponse(port,"POST",api+"/drafts/run",auth,origin,excelDefinition,201);
+            JsonNode accepted=apiJsonResponse(port,"POST",api+"/jobs/run",auth,origin,
+                    Map.of("packageId","closure","draftId",draft.path("draftId").asText()),202);
+            String firstId=accepted.path("jobId").asText();
+            JsonNode firstJob=awaitJobStatus(port,api+"/jobs/"+firstId,auth,"PASS");
+            assertEquals(Boolean.TRUE,firstJob.path("sourceSnapshotAvailable").asBoolean(false),firstJob.toString());
+            JsonNode firstProvenance=firstJob.path("sourceProvenance");
+            assertFileCallSite(firstProvenance,"templates/CLOSURE/Pacs008.xml","templates/CLOSURE/template.yaml");
+            assertFileCallSite(firstProvenance,"templates/flows/nested/Pacs008.xml","templates/flows/nested/flow.yaml");
+            assertFalse(firstProvenance.toString().contains("Pacs008-b.xml"),firstProvenance.toString());
+            String firstRevision=firstProvenance.path("revisions").path("executionRevisionDigest").path("revision").asText();
+            assertTrue(firstRevision.matches("[a-f0-9]{64}"),firstProvenance.toString());
+            assertTrue(Files.isDirectory(ServerConfig.load(config).dataDir.resolve("jobs").resolve(firstId).resolve("output")),
+                    "Accepted Job output remains independently writable under Server dataDir");
+            awaitArchive(port,api,firstId,auth);
+            String firstLog=readArchiveEntryText(port,api+"/jobs/"+firstId+"/artifacts/archive.zip",auth,"case.log");
+            assertNotNull(firstLog);assertTrue(firstLog.contains("<template>alpha-payload</template>"),firstLog);
+            assertTrue(firstLog.contains("<nested>alpha-payload</nested>"),firstLog);
+
+            Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: CLOSURE\n"
+                    +"description: Locator B after publication\nactions:\n"
+                    +"  nested: {type: flow, use: nested.closure.v1}\n"
+                    +"  tool: {type: tool, call: \"#{echo(payload='&{./Pacs008-b.xml}')}\"}\n");
+            JsonNode revalidated=apiJsonResponse(port,"POST",api+"/drafts/run",auth,origin,excelDefinition,201);
+            JsonNode second=apiJsonResponse(port,"POST",api+"/jobs/run",auth,origin,
+                    Map.of("packageId","closure","draftId",revalidated.path("draftId").asText()),202);
+            String secondId=second.path("jobId").asText();
+            JsonNode secondJob=awaitJobStatus(port,api+"/jobs/"+secondId,auth,"PASS");
+            JsonNode secondProvenance=secondJob.path("sourceProvenance");
+            assertFileCallSite(secondProvenance,"templates/CLOSURE/Pacs008-b.xml","templates/CLOSURE/template.yaml");
+            assertFileCallSite(secondProvenance,"templates/flows/nested/Pacs008.xml","templates/flows/nested/flow.yaml");
+            assertFalse(fileCallSites(secondProvenance,"templates/CLOSURE/Pacs008.xml").stream()
+                    .anyMatch(site->site.contains("templates/CLOSURE/template.yaml")),
+                    "Changed template caller must drop locator A: "+secondProvenance);
+            String secondRevision=secondProvenance.path("revisions").path("executionRevisionDigest").path("revision").asText();
+            assertNotEquals(firstRevision,secondRevision,"Locator A→B must change the execution revision digest");
+            JsonNode retained=getJson(port,api+"/jobs/"+firstId,auth).path("sourceProvenance");
+            assertEquals(firstProvenance,retained,
+                    "Accepted Job keeps locator A provenance after the authored descriptor moves to locator B");
+            assertEquals(firstRevision,retained.path("revisions").path("executionRevisionDigest").path("revision").asText());
+            awaitArchive(port,api,secondId,auth);
+            String secondLog=readArchiveEntryText(port,api+"/jobs/"+secondId+"/artifacts/archive.zip",auth,"case.log");
+            assertNotNull(secondLog);assertTrue(secondLog.contains("<template>beta-payload</template>"),secondLog);
+            assertTrue(secondLog.contains("<nested>alpha-payload</nested>"),secondLog);
+        } finally {
+            try {tomcat.stop();tomcat.destroy();} catch(Exception ignored) {}
+            if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);
+            if(oldHome==null)System.clearProperty("att.home");else System.setProperty("att.home",oldHome);
+        }
+    }
+
+    private static void assertFileCallSite(JsonNode provenance,String canonicalPath,String callerPath) {
+        List<String> sites=fileCallSites(provenance,canonicalPath);
+        assertFalse(sites.isEmpty(),"Missing FILE dependency "+canonicalPath+": "+provenance);
+        assertTrue(sites.stream().anyMatch(site->site.contains(callerPath)),
+                "Expected caller "+callerPath+" for "+canonicalPath+": "+sites);
+    }
+
+    private static List<String> fileCallSites(JsonNode provenance,String canonicalPath) {
+        List<String> sites=new java.util.ArrayList<>();
+        for(JsonNode dependency:provenance.path("dependencyClosure")) {
+            if(!"FILE".equals(dependency.path("kind").asText()))continue;
+            if(!canonicalPath.equals(dependency.path("canonicalPath").asText()))continue;
+            sites.add(dependency.path("callSite").asText());
+        }
+        return sites;
+    }
+
     private boolean sourceSnapshotSandboxAvailable() throws Exception {
         Path source=Files.createDirectories(temp.resolve("sandbox-probe/source/package"));
         Path snapshot=source.getParent();
@@ -193,7 +355,12 @@ class ServerWarUiIT {
         Path output=Files.createDirectories(temp.resolve("sandbox-probe/output"));
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",
                 System.getProperty("os.name","").toLowerCase(java.util.Locale.ROOT).contains("win")?"java.exe":"java");
-        List<String> command=att.exec.SourceSnapshotIsolation.wrap(List.of(javaBin.toString(),"-version"),snapshot,archive,output);
+        final List<String> command;
+        try {
+            command=att.exec.SourceSnapshotIsolation.wrap(List.of(javaBin.toString(),"-version"),snapshot,archive,output);
+        } catch(java.io.IOException unavailable) {
+            return false;
+        }
         Process probe=new ProcessBuilder(command).redirectErrorStream(true)
                 .redirectOutput(temp.resolve("sandbox-probe.log").toFile()).start();
         if(!probe.waitFor(10,TimeUnit.SECONDS)) { probe.destroyForcibly(); return false; }
@@ -1050,6 +1217,41 @@ class ServerWarUiIT {
             assertFalse(archive.stream().map(JarEntry::getName).anyMatch(name ->
                     name.matches("WEB-INF/lib/att-(server-api|web|worker)-[^/]+\\.jar")),
                     "ATT Server API, Web, and Worker jars must be combined into the versioned att-server jar; Engine remains a runtime module dependency");
+            JarEntry poiCore=archive.stream().filter(entry->entry.getName().matches("WEB-INF/lib/poi-[0-9][^/]*\\.jar"))
+                    .findFirst().orElse(null);
+            assertNotNull(poiCore,"Server WAR must ship Apache POI core for Job source-provenance Excel indexing");
+            assertTrue(archive.stream().map(JarEntry::getName).anyMatch(name ->
+                            name.matches("WEB-INF/lib/poi-ooxml-[0-9][^/]*\\.jar")),
+                    "Server WAR must ship poi-ooxml for Package resource indexing during admission");
+            Path extracted=Files.createTempDirectory("att-war-poi");
+            try {
+                Path poiJar=extracted.resolve(Path.of(poiCore.getName()).getFileName().toString());
+                Files.createDirectories(poiJar.getParent());
+                try(InputStream in=archive.getInputStream(poiCore)) {Files.copy(in,poiJar);}
+                try(JarInputStream poi=new JarInputStream(Files.newInputStream(poiJar))) {
+                    boolean dataFormatter=false;JarEntry entry;
+                    while((entry=poi.getNextJarEntry())!=null)
+                        if("org/apache/poi/ss/usermodel/DataFormatter.class".equals(entry.getName())){dataFormatter=true;break;}
+                    assertTrue(dataFormatter,"Packaged poi jar must contain DataFormatter for WAR-classloader Excel indexing");
+                }
+                List<URL> warLibs=new java.util.ArrayList<>();
+                Path libDir=Files.createDirectories(extracted.resolve("WEB-INF/lib"));
+                for(JarEntry entry:java.util.Collections.list(archive.entries())) {
+                    if(!entry.getName().startsWith("WEB-INF/lib/")||!entry.getName().endsWith(".jar"))continue;
+                    Path target=libDir.resolve(Path.of(entry.getName()).getFileName().toString());
+                    try(InputStream in=archive.getInputStream(entry)) {Files.copy(in,target);}
+                    warLibs.add(target.toUri().toURL());
+                }
+                try(URLClassLoader loader=new URLClassLoader(warLibs.toArray(URL[]::new),ClassLoader.getPlatformClassLoader())) {
+                    Class<?> formatter=Class.forName("org.apache.poi.ss.usermodel.DataFormatter",true,loader);
+                    assertNotNull(formatter.getDeclaredConstructor().newInstance(),
+                            "Isolated WAR WEB-INF/lib classloader must instantiate DataFormatter");
+                }
+            } finally {
+                try(var walk=Files.walk(extracted)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path->{try{Files.deleteIfExists(path);}catch(Exception ignored){}});
+                }
+            }
             Set<String> entries = new HashSet<>();
             try (JarInputStream app = new JarInputStream(archive.getInputStream(application))) {
                 JarEntry entry;
@@ -1580,9 +1782,12 @@ class ServerWarUiIT {
 
     private static String apiStatusDiagnostic(JsonNode response,int status) {
         if(status<400)return "";
-        JsonNode error=response==null?ServerRuntime.JSON.getNodeFactory().nullNode():response.path("error");
+        JsonNode body=response==null?ServerRuntime.JSON.getNodeFactory().nullNode():response;
+        JsonNode error=body.path("error");
+        String outcome=body.path("outcome").asText("");
         return " (code="+error.path("code").asText("unknown")
-                +", summary="+error.path("summary").asText("unavailable")+")";
+                +", summary="+error.path("summary").asText("unavailable")
+                +(outcome.isEmpty()?"":", outcome="+outcome)+")";
     }
 
     private static int apiStatus(int port, String method, String path, String authorization, String origin, Object body) throws Exception {

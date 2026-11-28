@@ -29,6 +29,38 @@ class ServerJobStorageTest {
             runtime.cleanupRequestedDeletions();assertFalse(runtime.store.jobRowExists(id));assertFalse(Files.exists(directory));
         }
     }
+
+    @Test void unavailableDeleteSurvivesHeldArtifactWriteLock() throws Exception {
+        try(ServerRuntime runtime=runtime("delete-archive-busy",null,Clock.systemUTC())) {
+            String gone="J0000000000000790",live="J0000000000000791";
+            seed(runtime,gone,"PASS",Instant.parse("2020-01-01T00:00:00Z"),false,mib(1));
+            seed(runtime,live,"PASS",Instant.parse("2020-01-01T00:00:00Z"),false,mib(1));
+            assertEquals("MARKED",runtime.deleteJob(gone,"operator").get("outcome"));
+            assertTrue(runtime.store.claimRequestedDeletion(gone,Long.MAX_VALUE));
+            assertTrue(runtime.reconcileDeletingJobs());
+            assertFalse(runtime.store.jobRowExists(gone));
+            var field=ServerRuntime.class.getDeclaredField("artifactLifecycle");
+            field.setAccessible(true);
+            var lock=(java.util.concurrent.locks.ReentrantReadWriteLock)field.get(runtime);
+            java.util.concurrent.CountDownLatch held=new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.CountDownLatch release=new java.util.concurrent.CountDownLatch(1);
+            Thread holder=new Thread(()->{
+                assertTrue(lock.writeLock().tryLock());
+                try {held.countDown();assertTrue(release.await(10,java.util.concurrent.TimeUnit.SECONDS));}
+                catch(InterruptedException interrupted){Thread.currentThread().interrupt();}
+                finally {lock.writeLock().unlock();}
+            },"artifact-write-lock-holder");
+            holder.start();
+            assertTrue(held.await(10,java.util.concurrent.TimeUnit.SECONDS));
+            try {
+                assertEquals("ALREADY_UNAVAILABLE",runtime.deleteJob(gone,"operator").get("outcome"));
+                assertEquals("ARCHIVE_BUSY",runtime.deleteJob(live,"operator").get("outcome"));
+            } finally {
+                release.countDown();
+                holder.join(10_000);
+            }
+        }
+    }
     @Test void loadQueryFiltersBeforePaginationAndHonorsPrincipalAndPins() throws Exception {
         try (ServerRuntime runtime=runtime("load-query",null,Clock.systemUTC())) {
             Instant finished=Instant.parse("2026-01-01T00:00:00Z");

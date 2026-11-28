@@ -103,7 +103,7 @@ class MultiModuleLayoutTest {
         assertFalse(build.contains("jar cf "), build);
         assertTrue(build.contains("att-dist/target/$LOCAL_PACKAGE_NAME.tar.gz"), build);
         assertTrue(build.contains("att-dist/target/$SERVER_PACKAGE_NAME.tar.gz"), build);
-        assertTrue(build.contains("MAX_BINARY_PACKAGE_BYTES=25000000"), build);
+        assertTrue(build.contains("MAX_BINARY_PACKAGE_BYTES=35000000"), build);
         assertTrue(build.contains("LOCAL_PACKAGE_ROOT=\"$LOCAL_PACKAGE_DIR/packages/default\""), build);
         assertTrue(build.contains("config/config.yaml"), build);
         int outputDir = build.indexOf("mkdir -p \"$LOCAL_PACKAGE_ROOT/output\"");

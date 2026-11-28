@@ -66,7 +66,8 @@ SERVER_WORK="$ROOT_DIR/target/release/server"
 LOCAL_ARCHIVE="$ROOT_DIR/att-dist/target/$LOCAL_PACKAGE_NAME.tar.gz"
 SERVER_ARCHIVE="$ROOT_DIR/att-dist/target/$SERVER_PACKAGE_NAME.tar.gz"
 SOURCE_ARCHIVE="$ROOT_DIR/att-dist/target/$SOURCE_PACKAGE_NAME.tar.gz"
-MAX_BINARY_PACKAGE_BYTES=25000000
+# Server WAR ships Apache POI (+ ooxml transitives) for Job source-provenance Excel indexing (#433).
+MAX_BINARY_PACKAGE_BYTES=35000000
 for command in mvn python3 tar; do
   if ! command -v "$command" >/dev/null 2>&1; then echo "$command is required to execute the ATT release gate" >&2; exit 2; fi
 done
@@ -258,7 +259,7 @@ fi
 for archive in "$LOCAL_ARCHIVE" "$SERVER_ARCHIVE"; do
   archive_size=$(wc -c < "$archive" | tr -d '[:space:]')
   if [ "$archive_size" -ge "$MAX_BINARY_PACKAGE_BYTES" ]; then
-    echo "Binary package must be smaller than 25 MB ($MAX_BINARY_PACKAGE_BYTES bytes): $archive ($archive_size bytes)" >&2; exit 2
+    echo "Binary package must be smaller than 35 MB ($MAX_BINARY_PACKAGE_BYTES bytes): $archive ($archive_size bytes)" >&2; exit 2
   fi
   echo "Verified package size: $archive ($archive_size bytes)"
 done

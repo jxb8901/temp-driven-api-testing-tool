@@ -783,6 +783,69 @@ class PackageValidatorTest {
                 || d.message().contains("schemas/catalog.yaml")), diagnostics.toString());
     }
 
+    @Test void sourceInspectionSkipsOutputWritabilityWhenExecutionWouldFailClosed() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("immutable-source"));
+        // A regular file blocks the writable-ancestor walk without relying on POSIX mode bits,
+        // which remain writable for privileged/root processes and are not portable.
+        Path blocker = Files.write(root.resolve("blocker"),
+                "not-a-directory".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Path blockedOutput = blocker.resolve("child/output");
+        FrameworkConfig config = new FrameworkConfig(java.nio.file.Paths.get("output"), root.resolve("report"),
+                root.resolve("logs"), "SIT", 1000, root.resolve("templates"),
+                Collections.<String, ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(root, config);
+        java.lang.reflect.Method layout = PackageValidator.class.getDeclaredMethod("validatePackageLayout",
+                ExecutionOptions.class, List.class);
+        layout.setAccessible(true);
+
+        List<Diagnostic> sourceDiagnostics = new ArrayList<Diagnostic>();
+        ExecutionOptions sourceOptions = new ExecutionOptions(null, null, null, Collections.emptySet(),
+                Collections.emptySet(), Collections.emptySet(), "source-layout", false, false, false, blockedOutput)
+                .withCheckOutputWritability(false);
+        layout.invoke(validator, sourceOptions, sourceDiagnostics);
+        assertFalse(sourceDiagnostics.stream().anyMatch(d -> DiagnosticCodes.PATH_INVALID.equals(d.code())
+                && d.message().contains("writable ancestor")), sourceDiagnostics.toString());
+
+        List<Diagnostic> executionDiagnostics = new ArrayList<Diagnostic>();
+        ExecutionOptions executionOptions = new ExecutionOptions(null, null, null, Collections.emptySet(),
+                Collections.emptySet(), Collections.emptySet(), "execution-layout", false, false, false, blockedOutput);
+        layout.invoke(validator, executionOptions, executionDiagnostics);
+        assertTrue(executionDiagnostics.stream().anyMatch(d -> DiagnosticCodes.PATH_INVALID.equals(d.code())
+                && d.message().contains("writable ancestor")), executionDiagnostics.toString());
+    }
+
+    @Test void runtimeValueValidationResolvesDescriptorRelativeFileExpressions() throws Exception {
+        Path flowDir = Files.createDirectories(tempDir.resolve("flows/CTI_HK"));
+        Files.write(flowDir.resolve("Pacs008.xml"), "<Pacs008/>".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.<String, ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        StageTemplate template = new StageTemplate("Invoke.CTI_HK.v1", flowDir,
+                Collections.singletonList(new TemplateAction("loadPayload",
+                        map("type", "assign", "name", "payload", "expression", "&{./Pacs008.xml}"),
+                        att.Version.TEMPLATE_SCHEMA)),
+                att.Version.TEMPLATE_SCHEMA, flowDir.resolve("flow.yaml"));
+        java.lang.reflect.Method values = PackageValidator.class.getDeclaredMethod("validateTemplateValues",
+                StageTemplate.class, att.core.TestCase.class, att.core.StageCaseData.class, FrameworkConfig.class);
+        values.setAccessible(true);
+        att.core.StageCaseData stage = new att.core.StageCaseData("invoke", "Invoke.CTI_HK.v1",
+                Collections.<String, Object>singletonMap("name", "Invoke.CTI_HK.v1"));
+        att.core.TestCase testCase = new att.core.TestCase(2, "cti", "sheet", "TC001", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.singletonMap("invoke", stage), null);
+        assertDoesNotThrow(() -> values.invoke(validator, template, testCase, stage, config));
+
+        StageTemplate missingScope = new StageTemplate("Invoke.CTI_HK.v1", tempDir,
+                Collections.singletonList(new TemplateAction("loadPayload",
+                        map("type", "assign", "name", "payload", "expression", "&{./Pacs008.xml}"),
+                        att.Version.TEMPLATE_SCHEMA)),
+                att.Version.TEMPLATE_SCHEMA, tempDir.resolve("flow.yaml"));
+        java.lang.reflect.InvocationTargetException missing = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> values.invoke(validator, missingScope, testCase, stage, config));
+        assertTrue(String.valueOf(missing.getCause()).contains("Package resource not found")
+                || String.valueOf(missing.getCause().getMessage()).contains("Package resource not found"),
+                String.valueOf(missing.getCause()));
+    }
+
     @Test void windowsPackageValidationPublishesSkippedShellWarning() throws Exception {
         Path root = java.nio.file.Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
         Path home = java.nio.file.Paths.get("").toAbsolutePath().normalize();

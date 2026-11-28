@@ -2,7 +2,7 @@
 
 # Studio Read-only validation
 
-Studio uses bounded, read-only Server validation and displays the `att-validation/v1` report. Contextual actions in Configuration, Package Explorer, and LOAD Scenarios create durable asynchronous records. The advanced **Validate** workspace remains available at `#/validate` for its synchronous form; it is no longer a top-level sidebar destination, and existing direct links continue to work. Neither flow edits Config or Package files or creates a RUN, LOAD, Debug draft, Job, Schedule, or saved snapshot.
+Studio uses bounded, read-only Server validation and displays the `att-validation/v1` report. Contextual actions in Configuration, Package Explorer, and LOAD Scenarios create durable asynchronous records. The advanced **Validate** workspace remains available at `#/validate` for its synchronous form; it is no longer a top-level sidebar destination, and existing direct links continue to work. Neither flow edits Config or Package files or creates a RUN, LOAD, Debug draft, Job, Schedule, or saved snapshot. Read-only validation does not require the immutable Package revision or its configured relative `outputDirectory` to be writable; execution readiness for actual Job/CLI output destinations remains separate.
 
 ## Choose a scope
 

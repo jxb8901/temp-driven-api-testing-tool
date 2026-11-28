@@ -8,6 +8,8 @@
 
 Package validation 會檢查 Definition、Flow、Tool、Testdata、Runtime Configuration、已登記 schema 和 semantic reference。它不會執行 Tool、提交 Server Job 或啟動 LOAD scheduler。Validation 為唯讀，也不會建立 authoring input。
 
+Studio 及其他 immutable source inspection 路徑會驗證 Package 設定語意，不要求 pinned revision 或其相對 `outputDirectory` 可寫。本機 CLI `validate`/`run` 與 Server Job 執行仍會檢查實際 output 目的地是否有可寫 ancestor；Server Job 使用獨立配置的 Job output directory，不會寫入 immutable source tree。
+
 使用 selected-validation option 可快速檢查一個 Definition 或 Resource target。分享 Package 或升級 build 前，請驗證整個 Package 和每個所選 Environment。[Schema 和 Version Matrix](appendices/schema-matrix.md) 列出此 release 使用的契約。Diagnostic 會保留 source file、field 和結構化位置；automation 應使用穩定 diagnostic code，而非 message text。
 
 | 類別 | 常見原因 | 修正方式 |

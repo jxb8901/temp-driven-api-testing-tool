@@ -126,7 +126,11 @@ class ServerRuntimeTest {
     }
 
     @Test void launchesOneStructuredWorkerProcessForAnAcceptedJob() throws Exception {
-        Path allowed=Files.createDirectory(temp.resolve("packages"));Path pkg=Files.createDirectory(allowed.resolve("broken-package"));
+        Path allowed=Files.createDirectory(temp.resolve("packages"));Path pkg=Files.createDirectory(allowed.resolve("worker-package"));
+        Files.writeString(pkg.resolve("package.yaml"),"schemaVersion: att-package/v1\n");
+        Files.createDirectories(pkg.resolve("templates/SIMPLE"));
+        Files.writeString(pkg.resolve("templates/SIMPLE/template.yaml"),
+                "schemaVersion: att-template/v3.6\nname: SIMPLE\ndescription: Worker launch fixture\nactions:\n  show: {type: log, message: once}\n");
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path runtimeRoot=Files.createDirectory(temp.resolve("runtime"));Path runtimeConfigDirectory=Files.createDirectory(runtimeRoot.resolve("config"));
         Path runtimeConfig=runtimeConfigDirectory.resolve("config.yaml");Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.13\nenvironment: SIT\n");
@@ -142,7 +146,11 @@ class ServerRuntimeTest {
         }
         ServerRuntime runtime=new ServerRuntime(config,libs.toString());
         try {
-            JsonNode request=ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"target\":{\"type\":\"template\",\"id\":\"missing\"}}");
+            ServerRuntime.JobConflictException missing=assertThrows(ServerRuntime.JobConflictException.class,
+                    ()->runtime.submit("debug",ServerRuntime.JSON.readTree(
+                            "{\"packageId\":\"p\",\"target\":{\"type\":\"template\",\"id\":\"missing\"}}"),"ci-test"));
+            assertEquals("ATT-SOURCE-EXECUTION-ROOT-MISSING",missing.code);
+            JsonNode request=ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"target\":{\"type\":\"template\",\"id\":\"SIMPLE\"}}");
             Map<String,Object> submitted=runtime.submit("debug",request,"ci-test");String id=(String)submitted.get("jobId");
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);Map<String,Object> record=runtime.jobRecord(id);while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(record.get("status"))&&System.nanoTime()<deadline){Thread.sleep(20);record=runtime.jobRecord(id);}
             assertTrue(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(record.get("status")),"Worker must produce a terminal result");while(!runtime.jobs.isEmpty()&&System.nanoTime()<deadline)Thread.sleep(20);assertTrue(runtime.jobs.isEmpty(),"Completed Job objects should be evicted from memory");

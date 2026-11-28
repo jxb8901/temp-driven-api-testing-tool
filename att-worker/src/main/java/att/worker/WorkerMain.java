@@ -975,7 +975,7 @@ public final class WorkerMain {
                 try {
                     att.api.OperationResult result=new att.api.DefaultAttService().validate(new att.api.ValidateRequest(packageRoot,configPath,
                             profile,Collections.<Path>emptyList(),null,Collections.<String>emptySet(),Collections.<String>emptySet(),
-                            Collections.<String>emptySet(),false,"package"));
+                            Collections.<String>emptySet(),false,"package",false));
                     att.server.api.AttValidationReport.Section inventory=report.addSection(label+" — Testcases / Templates / Flows / dependencies",null,result.exitCode()==0?"PASS":"FAIL");
                     addValidationDiagnostics(inventory,result.diagnostics());if(result.exitCode()!=0)report.exitCode(2);
                 } catch(Exception invalid) {
@@ -995,7 +995,7 @@ public final class WorkerMain {
             if("suite".equals(scope)&&request.inspectionPath!=null)suites.add(Paths.get(request.inspectionPath));
             if("case".equals(scope)&&request.inspectionResourceId!=null)cases.add(request.inspectionResourceId);
             att.api.OperationResult result=new att.api.DefaultAttService().validate(new att.api.ValidateRequest(packageRoot,configPath,
-                    request.environment,suites,path(request.suiteDirectory),cases,set(request.tags),set(request.excludeTags),false,"selected"));
+                    request.environment,suites,path(request.suiteDirectory),cases,set(request.tags),set(request.excludeTags),false,"selected",false));
             addValidationDiagnostics(selected,result.diagnostics());if(result.exitCode()!=0)selected.status("FAIL");
             if(report.exitCode()==0&&result.exitCode()!=0)report.exitCode(2);
             return validationResult(report,request,sourceRevisionBefore,packageRoot,configPath);
@@ -1018,7 +1018,7 @@ public final class WorkerMain {
                     String resourceId=identity.get("logicalId") instanceof String?(String)identity.get("logicalId"):request.inspectionResourceId;
                     staticValidation=new att.api.DefaultAttService().validateSelectedResource(
                             new att.api.ValidateRequest(packageRoot,configPath,request.environment,Collections.<Path>emptyList(),null,
-                                    Collections.<String>emptySet(),Collections.<String>emptySet(),Collections.<String>emptySet(),false,"selected-resource"),
+                                    Collections.<String>emptySet(),Collections.<String>emptySet(),Collections.<String>emptySet(),false,"selected-resource",false),
                             request.inspectionType,resourceId);
                     if(staticValidation.exitCode()==2)selected.status("FAIL");
                 }
