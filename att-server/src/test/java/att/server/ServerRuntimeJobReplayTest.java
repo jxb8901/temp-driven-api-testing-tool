@@ -426,6 +426,67 @@ class ServerRuntimeJobReplayTest {
         }
     }
 
+    @Test void nativeRunUsesPackageManifestFlowRoot() throws Exception {
+        Fixture fixture=fixture();
+        Files.writeString(fixture.root.resolve("package.yaml"),"schemaVersion: att-package/v2\n"
+                +"resources:\n  flowRoot: custom-flows\ntestdata:\n  descriptors: [testdata/base.yaml]\n"
+                +"  environments:\n    SIT: [testdata/sit.yaml]\n");
+        Path custom=Files.createDirectories(fixture.root.resolve("custom-flows/custom"));
+        Files.writeString(custom.resolve("payload.xml"),"<custom/>\n");
+        Files.writeString(custom.resolve("flow.yaml"),"schemaVersion: att-flow/v3.6\nid: custom.flow.v1\nname: Custom\n"
+                +"description: Manifest Flow root fixture\nactions:\n  body: {type: log, message: '&{./payload.xml}'}\n");
+        Path nativeCase=Files.createDirectories(fixture.root.resolve("testcase/native-custom"));
+        Files.writeString(nativeCase.resolve("testcase.yaml"),
+                "schemaVersion: att-testcase/v1\nid: native.custom\nname: Native custom root\n"
+                        +"description: Uses Package Manifest flowRoot\nflow: custom.flow.v1\n"
+                        +"dataSource:\n  type: inline\n  records: [{recordId: C1, data: {}}]\n");
+        ServerConfig serverConfig=ServerConfig.load(fixture.server);
+        att.config.FrameworkConfig framework=new att.config.FrameworkConfigLoader().loadDiscovery(
+                serverConfig.runtimeConfigPath,ServerConfig.runtimeConfigRoot(serverConfig.runtimeConfigPath),
+                fixture.root,"SIT");
+        assertEquals(Path.of("custom-flows"),framework.flowRoot());
+        Path schema=att.validation.SchemaFiles.resolve(fixture.root,"att-testcase-v1.schema.json");
+        att.testcase.TestCaseDefinitionResolver resolver=new att.testcase.TestCaseDefinitionResolver(schema);
+        assertThrows(Exception.class,()->resolver.resolve(nativeCase.resolve("testcase.yaml"),"p",fixture.root,
+                att.flow.PackageFlowRoots.DEFAULT_FLOW_ROOT,framework.templatesRoot(),
+                att.testcase.TestCaseDefinitionResolver.Options.defaults()),
+                "Default flows/ must not resolve a Native Case that lives only under resources.flowRoot");
+        assertEquals("custom.flow.v1",resolver.resolve(nativeCase.resolve("testcase.yaml"),"p",fixture.root,
+                framework.flowRoot(),framework.templatesRoot(),
+                att.testcase.TestCaseDefinitionResolver.Options.defaults()).definition().flowId());
+        att.validation.SourceCandidateValidator.ExecutionFileRoot root=ServerRuntime.nativeDefinitionFlowRoot(
+                "p",fixture.root,framework,"testcase/native-custom/testcase.yaml");
+        assertEquals("flow",root.type);
+        assertEquals("custom.flow.v1",root.id);
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            var runDefinition=ServerRuntime.JSON.createObjectNode();
+            runDefinition.put("schemaVersion",RunDefinition.NATIVE_CASE_VERSION);runDefinition.put("executionType","run");
+            runDefinition.put("packageId","p");runDefinition.put("environment","SIT");
+            runDefinition.putObject("options").put("debug",false).put("failFast",false);
+            var target=runDefinition.putObject("target");
+            target.put("type","nativeCase");target.put("definitionId","native.custom");
+            target.putObject("selection").putArray("resolvedCaseIds").add("C1");
+            Map<String,Object> draft=runtime.createRunDraft(runDefinition,"alice");
+            assertNotNull(draft.get("draftId"),draft.toString());
+            try {
+                String id=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(draft.get("draftId"))),"alice","alice").get("jobId"));
+                await(runtime,id);
+                assertEquals("PASS",runtime.jobRecord(id).get("status"),runtime.resultRecord(id).toString());
+                Map<?,?> provenance=(Map<?,?>)runtime.jobRecord(id).get("sourceProvenance");
+                assertTrue(((List<?>)provenance.get("dependencyClosure")).stream().filter(Map.class::isInstance)
+                        .map(value->(Map<?,?>)value)
+                        .anyMatch(value->"FILE".equals(String.valueOf(value.get("kind")))
+                                &&"custom-flows/custom/payload.xml".equals(String.valueOf(value.get("canonicalPath")))),
+                        provenance.toString());
+            } catch(ServerRuntime.JobConflictException isolation) {
+                org.junit.jupiter.api.Assumptions.assumeFalse("ATT-SOURCE-ISOLATION-UNAVAILABLE".equals(isolation.code),
+                        "OS-enforced source snapshot sandbox is unavailable on this host");
+                throw isolation;
+            }
+        }
+    }
+
     @Test void legacyRetainedExecutionSpecV1StillParses() throws Exception {
         var legacy=ServerRuntime.JSON.createObjectNode();legacy.put("schemaVersion","att-job-execution/v1");
         legacy.put("revisionPolicy","reject-package-changes");legacy.put("revision","a".repeat(64));

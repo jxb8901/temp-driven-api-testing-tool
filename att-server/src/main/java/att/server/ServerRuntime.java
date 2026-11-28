@@ -5557,6 +5557,16 @@ final class ServerRuntime implements AutoCloseable {
         return selected;
     }
 
+    /** Test seam for Native Case Flow-root admission parity with Worker/Engine. */
+    static att.validation.SourceCandidateValidator.ExecutionFileRoot nativeDefinitionFlowRoot(
+            String packageId,Path packageRoot,att.config.FrameworkConfig framework,String relativePath) throws Exception {
+        LinkedHashSet<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots=new LinkedHashSet<>();
+        addNativeDefinitionFlowRoot(roots,packageId,packageRoot,framework,relativePath);
+        if(roots.size()!=1)
+            throw new IllegalStateException("Native Case '"+relativePath+"' must resolve exactly one Flow root");
+        return roots.iterator().next();
+    }
+
     private static void addNativeDefinitionFlowRoot(Set<att.validation.SourceCandidateValidator.ExecutionFileRoot> roots,
                                                     String packageId,Path packageRoot,att.config.FrameworkConfig framework,
                                                     String relativePath) throws Exception {
@@ -5567,7 +5577,7 @@ final class ServerRuntime implements AutoCloseable {
             Path schema=att.validation.SchemaFiles.resolve(resources.packageRoot(),"att-testcase-v1.schema.json");
             att.testcase.TestCaseResolutionResult resolved=new att.testcase.TestCaseDefinitionResolver(schema).resolve(
                     source.canonicalPath(),packageId,resources.packageRoot(),
-                    att.flow.PackageFlowRoots.DEFAULT_FLOW_ROOT,framework.templatesRoot(),
+                    framework.flowRoot(),framework.templatesRoot(),
                     att.testcase.TestCaseDefinitionResolver.Options.defaults());
             String flowId=resolved.definition().flowId();
             if(flowId==null||flowId.isBlank())
